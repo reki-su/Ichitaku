@@ -15,6 +15,8 @@ struct ShopSearchCondition {
     var longitude: Double?
     var stationLatitude: Double?
     var stationLongitude: Double?
+    var walkMaxMinutes: Int = 15
+    var carMaxMinutes: Int = 30
 
     /// APIに渡すキーワードを組み立てます。
     var composedKeyword: String {
@@ -30,6 +32,11 @@ struct ShopSearchCondition {
     /// 検索条件を短く表示するための文言です。
     var summaryChips: [String] {
         var chips: [String] = ["人数: \(peopleCount)人", "移動: \(transport.label)"]
+        if transport == .walk {
+            chips.append("徒歩\(walkMaxMinutes)分以内")
+        } else if transport == .car {
+            chips.append("車\(carMaxMinutes)分以内")
+        }
 
         if transport == .train && !stationKeyword.isEmpty {
             chips.append("駅周辺: \(stationKeyword)")

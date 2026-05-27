@@ -278,7 +278,7 @@ final class ShopRouletteViewModel {
                     toLat: shopLat, toLng: shopLng,
                     speedMetersPerMinute: 80
                 )
-                return minutes <= 15
+                return minutes <= max(condition.walkMaxMinutes, 1)
             }
         case .car:
             guard let lat = condition.latitude, let lng = condition.longitude else { return shops }
@@ -289,7 +289,7 @@ final class ShopRouletteViewModel {
                     toLat: shopLat, toLng: shopLng,
                     speedMetersPerMinute: 500
                 )
-                return minutes <= 30
+                return minutes <= max(condition.carMaxMinutes, 1)
             }
         case .train:
             return shops
