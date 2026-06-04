@@ -73,9 +73,7 @@ final class ShopRouletteViewModel {
     /// 条件を段階的にゆるめながら店舗候補を取得します。
     private func fetchWithFallback(condition: ShopSearchCondition) async throws -> [Shop]? {
         var attempts: [ShopSearchCondition] = [condition]
-        attempts.append(relaxedCondition(base: condition, removeScene: true))
-        attempts.append(relaxedCondition(base: condition, removeScene: true, removeBusinessStatus: true))
-        attempts.append(relaxedCondition(base: condition, removeScene: true, removeBusinessStatus: true, removeIzakayaFilter: true))
+        attempts.append(relaxedCondition(base: condition, removeOptionFilters: true))
 
         // 位置条件を外すフォールバックは駅検索時のみ許可する。
         if condition.transport == .train {
@@ -83,10 +81,10 @@ final class ShopRouletteViewModel {
             attempts.append(conditionForTrain(base: condition, keepOnlyMainKeyword: true))
         } else if condition.transport == .car {
             // 車検索は最後に位置条件を外して広域検索を試す。
-            attempts.append(relaxedCondition(base: condition, removeScene: true, removeLocation: true, removeBusinessStatus: true, removeIzakayaFilter: true))
+            attempts.append(relaxedCondition(base: condition, removeLocation: true, removeOptionFilters: true))
         } else if condition.transport == .walk {
             // 徒歩検索も最終的には位置条件を外して救済する。
-            attempts.append(relaxedCondition(base: condition, removeScene: true, removeLocation: true, removeBusinessStatus: true, removeIzakayaFilter: true))
+            attempts.append(relaxedCondition(base: condition, removeLocation: true, removeOptionFilters: true))
         }
 
         for attempt in attempts {
@@ -96,23 +94,19 @@ final class ShopRouletteViewModel {
             let strictlyBudgeted = applyBudgetFilterIfNeeded(fetched, budgetCode: condition.budgetCode)
             if strictlyBudgeted.isEmpty { continue }
 
-            let openFiltered: [Shop]
-            if condition.businessStatus == .openNow {
-                openFiltered = strictlyBudgeted.filter { $0.isLikelyOpenNow() }
-            } else {
-                openFiltered = strictlyBudgeted
-            }
-            if openFiltered.isEmpty { continue }
+            let optionFiltered = applyOptionFilters(strictlyBudgeted, condition: condition)
+            if optionFiltered.isEmpty { continue }
 
-            let genreFiltered = applyIzakayaFilter(openFiltered, filter: condition.izakayaFilter)
-            if genreFiltered.isEmpty { continue }
-
-            let timeFiltered = applyTravelTimeFilter(genreFiltered, condition: attempt)
+            let timeFiltered = applyTravelTimeFilter(optionFiltered, condition: attempt)
             if timeFiltered.isEmpty { continue }
 
-            let withPhoto = timeFiltered.filter { $0.largePhotoURL != nil }
-            let source = withPhoto.isEmpty ? timeFiltered : withPhoto
-            return prioritizeByKeyword(source, keyword: condition.keyword)
+            let keywordFiltered = filterByKeywordIfNeeded(timeFiltered, keyword: condition.keyword)
+            if keywordFiltered.isEmpty { continue }
+
+            let withPhoto = keywordFiltered.filter { $0.largePhotoURL != nil }
+            let source = withPhoto.isEmpty ? keywordFiltered : withPhoto
+            let deBiased = reduceIzakayaBiasIfNeeded(source, condition: condition)
+            return prioritizeByKeyword(deBiased, keyword: condition.keyword)
         }
 
         return nil
@@ -121,24 +115,22 @@ final class ShopRouletteViewModel {
     /// 条件の一部を外したフォールバック条件を作ります。
     private func relaxedCondition(
         base: ShopSearchCondition,
-        removeScene: Bool = false,
         removeLocation: Bool = false,
-        removeBusinessStatus: Bool = false,
-        removeIzakayaFilter: Bool = false
+        removeOptionFilters: Bool = false
     ) -> ShopSearchCondition {
         var copy = base
-        if removeScene {
-            copy.scene = .none
-        }
-        if removeBusinessStatus {
-            copy.businessStatus = .anyTime
-        }
-        if removeIzakayaFilter {
-            copy.izakayaFilter = .all
-        }
         if removeLocation {
             copy.latitude = nil
             copy.longitude = nil
+        }
+        if removeOptionFilters {
+            copy.requiresFreeFood = false
+            copy.requiresFreeDrink = false
+            copy.requiresPrivateRoom = false
+            copy.requiresParking = false
+            copy.requiresOpenNow = false
+            copy.requiresMidnight = false
+            copy.requiresPet = false
         }
         return copy
     }
@@ -150,9 +142,13 @@ final class ShopRouletteViewModel {
         keepOnlyMainKeyword: Bool = false
     ) -> ShopSearchCondition {
         var copy = base
-        copy.scene = .none
-        copy.businessStatus = .anyTime
-        copy.izakayaFilter = .all
+        copy.requiresFreeFood = false
+        copy.requiresFreeDrink = false
+        copy.requiresPrivateRoom = false
+        copy.requiresParking = false
+        copy.requiresOpenNow = false
+        copy.requiresMidnight = false
+        copy.requiresPet = false
         // 電車検索では位置情報を使わないため、念のためnilに統一。
         copy.latitude = nil
         copy.longitude = nil
@@ -198,15 +194,17 @@ final class ShopRouletteViewModel {
         }
     }
 
-    /// 居酒屋絞り込みを適用します。
-    private func applyIzakayaFilter(_ shops: [Shop], filter: IzakayaFilter) -> [Shop] {
-        switch filter {
-        case .all:
-            return shops
-        case .izakayaOnly:
-            return shops.filter { ($0.genre?.name ?? "").contains("居酒屋") }
-        case .nonIzakayaOnly:
-            return shops.filter { !($0.genre?.name ?? "").contains("居酒屋") }
+    /// オンオフ条件の絞り込みを適用します。
+    private func applyOptionFilters(_ shops: [Shop], condition: ShopSearchCondition) -> [Shop] {
+        shops.filter { shop in
+            if condition.requiresFreeFood && shop.freeFood != "あり" { return false }
+            if condition.requiresFreeDrink && shop.freeDrink != "あり" { return false }
+            if condition.requiresPrivateRoom && shop.privateRoom != "あり" { return false }
+            if condition.requiresParking && shop.parking != "あり" { return false }
+            if condition.requiresMidnight && shop.midnight != "1" { return false }
+            if condition.requiresPet && shop.pet != "可" && shop.pet != "あり" { return false }
+            if condition.requiresOpenNow && !shop.isLikelyOpenNow() { return false }
+            return true
         }
     }
 
@@ -252,6 +250,34 @@ final class ShopRouletteViewModel {
         return result
     }
 
+    /// キーワード非一致の店舗を除外します。
+    private func filterByKeywordIfNeeded(_ shops: [Shop], keyword: String) -> [Shop] {
+        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return shops }
+
+        let tokens = trimmed
+            .lowercased()
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return shops }
+
+        return shops.filter { shop in
+            let haystack = [
+                shop.name,
+                shop.shopCatch ?? "",
+                shop.genre?.name ?? "",
+                shop.address ?? "",
+                shop.mobileAccess ?? ""
+            ]
+            .joined(separator: " ")
+            .lowercased()
+
+            // 入力した全トークンがどこかに含まれる店だけ残す（AND条件）。
+            return tokens.allSatisfy { haystack.contains($0) }
+        }
+    }
+
     private func relevanceScore(for shop: Shop, keyword: String) -> Int {
         var score = 0
         let targets = [
@@ -264,6 +290,28 @@ final class ShopRouletteViewModel {
             if target.contains(keyword) { score += 3 }
         }
         return score
+    }
+
+    /// キーワード検索時に居酒屋へ偏りすぎるのを抑えます。
+    private func reduceIzakayaBiasIfNeeded(_ shops: [Shop], condition: ShopSearchCondition) -> [Shop] {
+        let trimmedKeyword = condition.keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKeyword.isEmpty else { return shops }
+        guard condition.genre == .all else { return shops } // ジャンル指定時はそのまま尊重
+
+        let loweredKeyword = trimmedKeyword.lowercased()
+        let izakayaHintWords = ["居酒屋", "飲み", "酒", "bar", "バー"]
+        let userWantsIzakaya = izakayaHintWords.contains { loweredKeyword.contains($0) }
+        if userWantsIzakaya { return shops }
+
+        let nonIzakaya = shops.filter { !($0.genre?.name ?? "").contains("居酒屋") }
+        let izakaya = shops.filter { ($0.genre?.name ?? "").contains("居酒屋") }
+
+        // 非居酒屋が十分あるなら非居酒屋のみ採用（料理キーワード優先）
+        if nonIzakaya.count >= 4 {
+            return nonIzakaya
+        }
+        // 非居酒屋が少ないときは居酒屋も混ぜるが、最大2件に抑える
+        return nonIzakaya + Array(izakaya.prefix(2))
     }
 
     /// 移動手段ごとの所要時間で絞り込みます。
@@ -292,7 +340,16 @@ final class ShopRouletteViewModel {
                 return minutes <= max(condition.carMaxMinutes, 1)
             }
         case .train:
-            return shops
+            guard let lat = condition.stationLatitude, let lng = condition.stationLongitude else { return shops }
+            return shops.filter { shop in
+                guard let shopLat = shop.lat, let shopLng = shop.lng else { return false }
+                let minutes = travelMinutes(
+                    fromLat: lat, fromLng: lng,
+                    toLat: shopLat, toLng: shopLng,
+                    speedMetersPerMinute: 80
+                )
+                return minutes <= max(condition.trainMaxMinutes, 1)
+            }
         }
     }
 

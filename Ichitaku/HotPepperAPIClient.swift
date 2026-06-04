@@ -2,14 +2,17 @@ import Foundation
 
 /// 検索条件をまとめて扱うデータです。
 struct ShopSearchCondition {
+    var genre: GenreOption = .all
     var keyword: String = ""
     var stationKeyword: String = ""
     var budgetCode: String = ""
-    var peopleCount: Int = 2
-    var usage: UsageType = .dinner
-    var scene: UseScene = .none
-    var businessStatus: BusinessStatus = .openNow
-    var izakayaFilter: IzakayaFilter = .all
+    var requiresFreeFood: Bool = false
+    var requiresFreeDrink: Bool = false
+    var requiresPrivateRoom: Bool = false
+    var requiresParking: Bool = false
+    var requiresOpenNow: Bool = false
+    var requiresMidnight: Bool = false
+    var requiresPet: Bool = false
     var transport: TransportOption = .walk
     var latitude: Double?
     var longitude: Double?
@@ -17,6 +20,7 @@ struct ShopSearchCondition {
     var stationLongitude: Double?
     var walkMaxMinutes: Int = 15
     var carMaxMinutes: Int = 30
+    var trainMaxMinutes: Int = 10
 
     /// APIに渡すキーワードを組み立てます。
     var composedKeyword: String {
@@ -31,11 +35,13 @@ struct ShopSearchCondition {
 
     /// 検索条件を短く表示するための文言です。
     var summaryChips: [String] {
-        var chips: [String] = ["人数: \(peopleCount)人", "移動: \(transport.label)"]
+        var chips: [String] = ["移動: \(transport.label)"]
         if transport == .walk {
             chips.append("徒歩\(walkMaxMinutes)分以内")
         } else if transport == .car {
             chips.append("車\(carMaxMinutes)分以内")
+        } else if transport == .train {
+            chips.append("駅から徒歩\(trainMaxMinutes)分以内")
         }
 
         if transport == .train && !stationKeyword.isEmpty {
@@ -45,19 +51,57 @@ struct ShopSearchCondition {
         if !budgetCode.isEmpty {
             chips.append("予算: \(BudgetOption(code: budgetCode)?.label ?? budgetCode)")
         }
-        chips.append("用途: \(usage.label)")
-
         if !keyword.isEmpty {
             chips.append("キーワード: \(keyword)")
         }
-
-        if scene != .none {
-            chips.append("シーン: \(scene.label)")
-        }
-        chips.append("営業: \(businessStatus.label)")
-        chips.append("業態: \(izakayaFilter.label)")
+        if requiresFreeFood { chips.append("食べ放題") }
+        if requiresFreeDrink { chips.append("飲み放題") }
+        if requiresPrivateRoom { chips.append("個室") }
+        if requiresParking { chips.append("駐車場") }
+        if requiresOpenNow { chips.append("営業中") }
+        if requiresMidnight { chips.append("夜間営業") }
+        if requiresPet { chips.append("ペット可") }
 
         return chips
+    }
+}
+
+enum GenreOption: String, CaseIterable, Identifiable {
+    case all = ""
+    case g001 = "G001"
+    case g002 = "G002"
+    case g003 = "G003"
+    case g004 = "G004"
+    case g005 = "G005"
+    case g006 = "G006"
+    case g007 = "G007"
+    case g008 = "G008"
+    case g009 = "G009"
+    case g010 = "G010"
+    case g011 = "G011"
+    case g012 = "G012"
+    case g013 = "G013"
+
+    var id: String { rawValue }
+    var code: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all: return "指定なし"
+        case .g001: return "居酒屋"
+        case .g002: return "ダイニングバー・バル"
+        case .g003: return "創作料理"
+        case .g004: return "和食"
+        case .g005: return "洋食"
+        case .g006: return "イタリアン・フレンチ"
+        case .g007: return "中華"
+        case .g008: return "焼肉・ホルモン"
+        case .g009: return "アジア・エスニック料理"
+        case .g010: return "各国料理"
+        case .g011: return "カラオケ・パーティ"
+        case .g012: return "バー・カクテル"
+        case .g013: return "ラーメン"
+        }
     }
 }
 
@@ -220,6 +264,7 @@ enum BudgetOption: String, CaseIterable, Identifiable {
 
 struct HotPepperAPIClient {
     private let baseURL = "https://webservice.recruit.co.jp/hotpepper/gourmet/v1/"
+    private let maxRangeMeters: Double = 3000
 
     /// 店舗を検索します。
     func fetchShops(condition: ShopSearchCondition) async throws -> [Shop] {
@@ -228,7 +273,6 @@ struct HotPepperAPIClient {
             throw HotPepperAPIError.missingAPIKey
         }
 
-        var components = URLComponents(string: baseURL)
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "key", value: apiKey),
             URLQueryItem(name: "format", value: "json"),
@@ -238,44 +282,104 @@ struct HotPepperAPIClient {
         if !condition.composedKeyword.isEmpty {
             queryItems.append(URLQueryItem(name: "keyword", value: condition.composedKeyword))
         }
-
-        switch condition.transport {
-        case .walk:
-            queryItems.append(URLQueryItem(name: "range", value: "3"))
-        case .car:
-            queryItems.append(URLQueryItem(name: "range", value: "5"))
-        case .train:
-            // 駅検索は少し広めに取る（API仕様上の最大レンジ）。
-            queryItems.append(URLQueryItem(name: "range", value: "5"))
-            break
+        if !condition.genre.code.isEmpty {
+            queryItems.append(URLQueryItem(name: "genre", value: condition.genre.code))
         }
 
-        switch condition.transport {
-        case .walk, .car:
-            if let lat = condition.latitude, let lng = condition.longitude {
-                queryItems.append(URLQueryItem(name: "lat", value: String(lat)))
-                queryItems.append(URLQueryItem(name: "lng", value: String(lng)))
-            }
-        case .train:
-            if let lat = condition.stationLatitude, let lng = condition.stationLongitude {
-                queryItems.append(URLQueryItem(name: "lat", value: String(lat)))
-                queryItems.append(URLQueryItem(name: "lng", value: String(lng)))
-            }
-        }
+        // APIの最大レンジ(3km)で取得し、必要なら複数地点検索で範囲を広げる。
+        queryItems.append(URLQueryItem(name: "range", value: "5"))
 
-        switch condition.scene {
-        case .none:
-            break
-        case .allYouCanEat:
+        if condition.requiresFreeFood {
             queryItems.append(URLQueryItem(name: "free_food", value: "1"))
-        case .privateRoom:
+        }
+        if condition.requiresFreeDrink {
+            queryItems.append(URLQueryItem(name: "free_drink", value: "1"))
+        }
+        if condition.requiresPrivateRoom {
             queryItems.append(URLQueryItem(name: "private_room", value: "1"))
         }
-
-        if condition.usage == .lunch {
-            queryItems.append(URLQueryItem(name: "lunch", value: "1"))
+        if condition.requiresParking {
+            queryItems.append(URLQueryItem(name: "parking", value: "1"))
+        }
+        if condition.requiresPet {
+            queryItems.append(URLQueryItem(name: "pet", value: "1"))
         }
 
+        switch condition.transport {
+        case .train:
+            guard let lat = condition.stationLatitude, let lng = condition.stationLongitude else {
+                return try await fetchOnce(baseQueryItems: queryItems, latitude: nil, longitude: nil)
+            }
+            return try await fetchOnce(baseQueryItems: queryItems, latitude: lat, longitude: lng)
+        case .walk, .car:
+            guard let lat = condition.latitude, let lng = condition.longitude else {
+                return try await fetchOnce(baseQueryItems: queryItems, latitude: nil, longitude: nil)
+            }
+            return try await fetchExpandedArea(baseQueryItems: queryItems, condition: condition, centerLat: lat, centerLng: lng)
+        }
+    }
+
+    private func fetchExpandedArea(
+        baseQueryItems: [URLQueryItem],
+        condition: ShopSearchCondition,
+        centerLat: Double,
+        centerLng: Double
+    ) async throws -> [Shop] {
+        let desiredRadius = desiredRadiusMeters(for: condition)
+        if desiredRadius <= maxRangeMeters {
+            return try await fetchOnce(baseQueryItems: baseQueryItems, latitude: centerLat, longitude: centerLng)
+        }
+
+        var points: [(Double, Double)] = [(centerLat, centerLng)]
+        points.append(contentsOf: ringPoints(centerLat: centerLat, centerLng: centerLng, radiusMeters: 2500, count: 8))
+        if desiredRadius > 7000 {
+            points.append(contentsOf: ringPoints(centerLat: centerLat, centerLng: centerLng, radiusMeters: 5000, count: 16))
+        }
+
+        var uniqueByID: [String: Shop] = [:]
+        for (lat, lng) in points {
+            let shops = try await fetchOnce(baseQueryItems: baseQueryItems, latitude: lat, longitude: lng)
+            for shop in shops {
+                uniqueByID[shop.id] = shop
+            }
+        }
+        return Array(uniqueByID.values)
+    }
+
+    private func desiredRadiusMeters(for condition: ShopSearchCondition) -> Double {
+        switch condition.transport {
+        case .walk:
+            return Double(max(condition.walkMaxMinutes, 1)) * 80.0
+        case .car:
+            return Double(max(condition.carMaxMinutes, 1)) * 500.0
+        case .train:
+            return maxRangeMeters
+        }
+    }
+
+    private func ringPoints(centerLat: Double, centerLng: Double, radiusMeters: Double, count: Int) -> [(Double, Double)] {
+        guard count > 0 else { return [] }
+        let metersPerLat = 111_320.0
+        let metersPerLng = 111_320.0 * cos(centerLat * .pi / 180.0)
+        return (0..<count).map { index in
+            let angle = (Double(index) / Double(count)) * (2.0 * .pi)
+            let dLat = (radiusMeters * sin(angle)) / metersPerLat
+            let dLng = (radiusMeters * cos(angle)) / max(metersPerLng, 1.0)
+            return (centerLat + dLat, centerLng + dLng)
+        }
+    }
+
+    private func fetchOnce(
+        baseQueryItems: [URLQueryItem],
+        latitude: Double?,
+        longitude: Double?
+    ) async throws -> [Shop] {
+        var components = URLComponents(string: baseURL)
+        var queryItems = baseQueryItems
+        if let latitude, let longitude {
+            queryItems.append(URLQueryItem(name: "lat", value: String(latitude)))
+            queryItems.append(URLQueryItem(name: "lng", value: String(longitude)))
+        }
         components?.queryItems = queryItems
         guard let url = components?.url else {
             throw HotPepperAPIError.invalidURL

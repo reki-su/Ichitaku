@@ -13,7 +13,9 @@ struct Shop: Codable, Identifiable {
     let midnight: String?
     let privateRoom: String?
     let freeFood: String?
+    let freeDrink: String?
     let parking: String?
+    let pet: String?
     let address: String?
     let stationName: String?
     let lat: Double?
@@ -33,7 +35,9 @@ struct Shop: Codable, Identifiable {
         case midnight
         case privateRoom = "private_room"
         case freeFood = "free_food"
+        case freeDrink = "free_drink"
         case parking
+        case pet
         case address
         case stationName = "station_name"
         case lat
@@ -54,7 +58,9 @@ struct Shop: Codable, Identifiable {
         midnight: String?,
         privateRoom: String?,
         freeFood: String?,
+        freeDrink: String?,
         parking: String?,
+        pet: String?,
         address: String?,
         stationName: String?,
         lat: Double?,
@@ -73,7 +79,9 @@ struct Shop: Codable, Identifiable {
         self.midnight = midnight
         self.privateRoom = privateRoom
         self.freeFood = freeFood
+        self.freeDrink = freeDrink
         self.parking = parking
+        self.pet = pet
         self.address = address
         self.stationName = stationName
         self.lat = lat
@@ -95,7 +103,9 @@ struct Shop: Codable, Identifiable {
         midnight = try container.decodeIfPresent(String.self, forKey: .midnight)
         privateRoom = try container.decodeIfPresent(String.self, forKey: .privateRoom)
         freeFood = try container.decodeIfPresent(String.self, forKey: .freeFood)
+        freeDrink = try container.decodeIfPresent(String.self, forKey: .freeDrink)
         parking = try container.decodeIfPresent(String.self, forKey: .parking)
+        pet = try container.decodeIfPresent(String.self, forKey: .pet)
         address = try container.decodeIfPresent(String.self, forKey: .address)
         stationName = try container.decodeIfPresent(String.self, forKey: .stationName)
         lat = Shop.decodeDoubleIfPresent(from: container, key: .lat)
@@ -129,14 +139,15 @@ struct Shop: Codable, Identifiable {
 
     /// 外部マップへ遷移するためのURLです。
     var mapAppURL: URL? {
-        if let lat, let lng {
-            return URL(string: "https://www.google.com/maps/search/?api=1&query=\(lat),\(lng)")
-        }
-
-        let query = address ?? name
+        let query = [name, address].compactMap { $0 }.joined(separator: " ")
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
-        guard let encoded else { return nil }
-        return URL(string: "https://www.google.com/maps/search/?api=1&query=\(encoded)")
+        if let encoded {
+            return URL(string: "https://www.google.com/maps/dir/?api=1&destination=\(encoded)")
+        }
+        if let lat, let lng {
+            return URL(string: "https://www.google.com/maps/dir/?api=1&destination=\(lat),\(lng)")
+        }
+        return nil
     }
 
     /// ホットペッパーの店舗詳細ページURLです。
@@ -165,11 +176,16 @@ struct Shop: Codable, Identifiable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
+        var foundApplicableSegment = false
+        var foundParsableHours = false
+
         for segment in segments {
             if !segmentAppliesToday(segment, todaySymbol: todaySymbol, weekSymbols: weekSymbols) { continue }
+            foundApplicableSegment = true
             let nsText = segment as NSString
             let matches = regex.matches(in: segment, range: NSRange(location: 0, length: nsText.length))
             if matches.isEmpty { continue }
+            foundParsableHours = true
 
             for match in matches {
                 guard match.numberOfRanges >= 6 else { continue }
@@ -191,6 +207,11 @@ struct Shop: Codable, Identifiable {
                     return true
                 }
             }
+        }
+
+        // 今日の営業時間表記を読めない店は落としすぎないよう通す
+        if !foundApplicableSegment || !foundParsableHours {
+            return true
         }
 
         return false
@@ -232,7 +253,9 @@ struct Shop: Codable, Identifiable {
             midnight: "1",
             privateRoom: "あり",
             freeFood: "なし",
+            freeDrink: "あり",
             parking: "なし",
+            pet: "不可",
             address: "東京都渋谷区道玄坂2-10-12",
             stationName: "渋谷",
             lat: 35.658034,
@@ -252,7 +275,9 @@ struct Shop: Codable, Identifiable {
             midnight: "0",
             privateRoom: "なし",
             freeFood: "あり",
+            freeDrink: "あり",
             parking: "あり",
+            pet: "可",
             address: "東京都港区新橋1-8-3",
             stationName: "新橋",
             lat: 35.665498,
@@ -272,7 +297,9 @@ struct Shop: Codable, Identifiable {
             midnight: "1",
             privateRoom: "あり",
             freeFood: "あり",
+            freeDrink: "あり",
             parking: "なし",
+            pet: "不可",
             address: "東京都新宿区歌舞伎町1-5-7",
             stationName: "新宿",
             lat: 35.69384,
@@ -292,7 +319,9 @@ struct Shop: Codable, Identifiable {
             midnight: "0",
             privateRoom: "あり",
             freeFood: "なし",
+            freeDrink: "なし",
             parking: "あり",
+            pet: "可",
             address: "東京都千代田区丸の内1-9-1",
             stationName: "東京",
             lat: 35.681236,
