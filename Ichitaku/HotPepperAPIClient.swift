@@ -319,6 +319,40 @@ struct HotPepperAPIClient {
         }
     }
 
+    /// 店舗IDを指定して1件取得します。
+    func fetchShop(id: String) async throws -> Shop? {
+        let apiKey = ProcessInfo.processInfo.environment["HOTPEPPER_API_KEY"] ?? ""
+        guard !apiKey.isEmpty else {
+            throw HotPepperAPIError.missingAPIKey
+        }
+
+        var components = URLComponents(string: baseURL)
+        components?.queryItems = [
+            URLQueryItem(name: "key", value: apiKey),
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "id", value: id),
+            URLQueryItem(name: "count", value: "1")
+        ]
+
+        guard let url = components?.url else {
+            throw HotPepperAPIError.invalidURL
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            throw HotPepperAPIError.badResponse
+        }
+
+        do {
+            let decoded = try JSONDecoder().decode(HotPepperResponse.self, from: data)
+            return decoded.results.shop.first
+        } catch let error as DecodingError {
+            throw HotPepperAPIError.decodeFailed(describingDecodingError(error))
+        } catch {
+            throw error
+        }
+    }
+
     private func fetchExpandedArea(
         baseQueryItems: [URLQueryItem],
         condition: ShopSearchCondition,

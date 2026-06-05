@@ -585,7 +585,7 @@ enum SearchWizardDirection {
 struct SearchConditionView: View {
     private let suggestedKeywords = [
         "肉", "魚", "寿司", "焼肉", "居酒屋",
-        "焼き鳥", "ラーメン", "カフェ", "さっぱり", "ガッツリ"
+        "焼き鳥", "ラーメン", "さっぱり", "ガッツリ"
     ]
 
     @Binding var selectedTransport: TransportOption
@@ -1572,28 +1572,20 @@ struct DecisionCelebrationView: View {
 final class SearchHistoryStore {
     private(set) var entries: [HistoryEntry] = []
     private let saveKey = "ichitaku.history.entries"
+    private let maxRetention: TimeInterval = 24 * 60 * 60
 
     init() {
         load()
+        pruneExpiredEntries()
     }
 
     @discardableResult
     func add(shop: Shop) -> UUID {
+        pruneExpiredEntries()
         entries.removeAll { $0.shopID == shop.id }
         let entry = HistoryEntry(
             date: Date(),
-            shopID: shop.id,
-            shopName: shop.name,
-            address: shop.address,
-            photoURL: shop.largePhotoURL?.absoluteString,
-            mapURL: shop.mapAppURL?.absoluteString,
-            hotPepperURL: shop.hotPepperURL?.absoluteString,
-            genre: shop.genre?.name,
-            budget: shop.budget.name ?? shop.budget.average,
-            open: shop.open,
-            access: shop.mobileAccess,
-            lat: shop.lat,
-            lng: shop.lng
+            shopID: shop.id
         )
         entries.insert(entry, at: 0)
         save()
@@ -1601,6 +1593,7 @@ final class SearchHistoryStore {
     }
 
     func remove(entryID: UUID) {
+        pruneExpiredEntries()
         entries.removeAll { $0.id == entryID }
         save()
     }
@@ -1613,6 +1606,13 @@ final class SearchHistoryStore {
         entries = decoded
     }
 
+    private func pruneExpiredEntries(referenceDate: Date = Date()) {
+        entries.removeAll {
+            referenceDate.timeIntervalSince($0.date) > maxRetention
+        }
+        save()
+    }
+
     private func save() {
         guard let encoded = try? JSONEncoder().encode(entries) else { return }
         UserDefaults.standard.set(encoded, forKey: saveKey)
@@ -1623,21 +1623,47 @@ struct HistoryEntry: Identifiable, Codable {
     var id: UUID = UUID()
     let date: Date
     let shopID: String
-    let shopName: String
-    let address: String?
-    let photoURL: String?
-    let mapURL: String?
-    let hotPepperURL: String?
-    let genre: String?
-    let budget: String?
-    let open: String?
-    let access: String?
-    let lat: Double?
-    let lng: Double?
+}
+
+@Observable
+@MainActor
+final class HistoryShopStore {
+    private let apiClient = HotPepperAPIClient()
+    private(set) var shopsByID: [String: Shop] = [:]
+    private(set) var loadingIDs: Set<String> = []
+
+    func shop(for shopID: String) -> Shop? {
+        shopsByID[shopID]
+    }
+
+    func isLoading(shopID: String) -> Bool {
+        loadingIDs.contains(shopID)
+    }
+
+    func loadShops(for shopIDs: [String]) async {
+        for shopID in shopIDs {
+            await loadShop(shopID: shopID)
+        }
+    }
+
+    func loadShop(shopID: String) async {
+        guard shopsByID[shopID] == nil, !loadingIDs.contains(shopID) else { return }
+        loadingIDs.insert(shopID)
+        defer { loadingIDs.remove(shopID) }
+
+        do {
+            if let shop = try await apiClient.fetchShop(id: shopID) {
+                shopsByID[shopID] = shop
+            }
+        } catch {
+            // 履歴表示では失敗時に静かに落とし、UI側で読み込み中/取得不可を出します。
+        }
+    }
 }
 
 struct HistoryListView: View {
     @Bindable var historyStore: SearchHistoryStore
+    @State private var historyShopStore = HistoryShopStore()
 
     var body: some View {
         ScrollView {
@@ -1673,9 +1699,13 @@ struct HistoryListView: View {
                             ) {
                                 ForEach(section.entries, id: \.id) { entry in
                                     NavigationLink {
-                                        HistoryDetailView(entry: entry)
+                                        HistoryDetailView(entry: entry, historyShopStore: historyShopStore)
                                     } label: {
-                                        HistoryMenuCard(entry: entry)
+                                        HistoryMenuCard(
+                                            entry: entry,
+                                            shop: historyShopStore.shop(for: entry.shopID),
+                                            isLoading: historyShopStore.isLoading(shopID: entry.shopID)
+                                        )
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -1690,6 +1720,9 @@ struct HistoryListView: View {
         .background(Color.wasiBackground.ignoresSafeArea())
         .navigationTitle("履歴")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: historyStore.entries.map(\.shopID)) {
+            await historyShopStore.loadShops(for: historyStore.entries.map(\.shopID))
+        }
     }
 
     private var groupedEntries: [HistoryMonthSection] {
@@ -1722,6 +1755,8 @@ private struct HistoryMonthSection {
 
 struct HistoryMenuCard: View {
     let entry: HistoryEntry
+    let shop: Shop?
+    let isLoading: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1729,7 +1764,7 @@ struct HistoryMenuCard: View {
                 dateBadge
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.shopName)
+                    Text(shop?.name ?? (isLoading ? "読み込み中..." : "店舗情報を取得できません"))
                         .font(.wasiDisplay(18, weight: .semibold))
                         .foregroundStyle(Color.wasiInk)
                         .lineLimit(2)
@@ -1741,10 +1776,12 @@ struct HistoryMenuCard: View {
                 Spacer()
             }
 
-            AsyncImage(url: URL(string: entry.photoURL ?? "")) { phase in
+            AsyncImage(url: shop?.largePhotoURL) { phase in
                 switch phase {
                 case .success(let image):
                     image.resizable().scaledToFill()
+                case .empty:
+                    ZStack { Color.wasiAccentLight; ProgressView().tint(Color.wasiAccent) }
                 default:
                     Color.wasiAccentLight
                 }
@@ -1754,7 +1791,17 @@ struct HistoryMenuCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.wasiBorder, lineWidth: 0.6))
 
-            historyMiniLine(title: "住所", value: entry.address ?? "住所情報なし", symbol: "mappin.and.ellipse")
+            if shop?.largePhotoURL != nil {
+                Text("画像提供：ホットペッパー グルメ")
+                    .font(.wasiBody(9))
+                    .foregroundStyle(Color.wasiInkLight)
+            }
+
+            historyMiniLine(
+                title: "住所",
+                value: shop?.address ?? (isLoading ? "店舗情報を読み込み中です" : "住所情報を取得できません"),
+                symbol: "mappin.and.ellipse"
+            )
 
             HStack(spacing: 6) {
                 Spacer()
@@ -1827,36 +1874,12 @@ struct HistoryMenuCard: View {
 
 struct HistoryDetailView: View {
     let entry: HistoryEntry
+    @Bindable var historyShopStore: HistoryShopStore
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(entry.shopName)
-                        .font(.wasiDisplay(28))
-                        .foregroundStyle(Color.wasiInk)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .multilineTextAlignment(.center)
-
-                    AsyncImage(url: URL(string: entry.photoURL ?? "")) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        default:
-                            Color.wasiAccentLight
-                        }
-                    }
-                    .frame(height: 220)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.wasiBorder, lineWidth: 0.8))
-
-                    historyRow(title: "住所", value: entry.address ?? "情報なし")
-                    historyRow(title: "予算", value: entry.budget ?? "情報なし")
-                    historyRow(title: "営業時間", value: entry.open ?? "情報なし")
-                    historyRow(title: "アクセス", value: entry.access ?? "情報なし")
-                    historyRow(title: "保存日時", value: entry.date.formatted(date: .abbreviated, time: .shortened))
-                }
+                historyContentCard
                 .padding(.horizontal, 20)
                 .padding(.vertical, 22)
                 .background(Color.wasiSurface)
@@ -1872,8 +1895,8 @@ struct HistoryDetailView: View {
                 .overlay(alignment: .bottomLeading) { miniFlourish().rotationEffect(.degrees(180)).offset(x: 6, y: -6) }
                 .overlay(alignment: .bottomTrailing) { miniFlourish().rotationEffect(.degrees(180)).scaleEffect(x: -1, y: 1).offset(x: -6, y: -6) }
 
-                if let mapURLString = entry.mapURL, let mapURL = URL(string: mapURLString) {
-                    if let lat = entry.lat, let lng = entry.lng {
+                if let shop = historyShopStore.shop(for: entry.shopID), let mapURL = shop.mapAppURL {
+                    if let lat = shop.lat, let lng = shop.lng {
                         let region = MKCoordinateRegion(
                             center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
                             span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
@@ -1896,6 +1919,74 @@ struct HistoryDetailView: View {
         .background(Color.wasiBackground.ignoresSafeArea())
         .navigationTitle("履歴詳細")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: entry.shopID) {
+            await historyShopStore.loadShop(shopID: entry.shopID)
+        }
+    }
+
+    @ViewBuilder
+    private var historyContentCard: some View {
+        if let shop = historyShopStore.shop(for: entry.shopID) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(shop.name)
+                    .font(.wasiDisplay(28))
+                    .foregroundStyle(Color.wasiInk)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
+
+                AsyncImage(url: shop.largePhotoURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().scaledToFill()
+                    case .empty:
+                        ZStack { Color.wasiAccentLight; ProgressView().tint(Color.wasiAccent) }
+                    default:
+                        Color.wasiAccentLight
+                    }
+                }
+                .frame(height: 220)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.wasiBorder, lineWidth: 0.8))
+
+                if shop.largePhotoURL != nil {
+                    Text("画像提供：ホットペッパー グルメ")
+                        .font(.wasiBody(10))
+                        .foregroundStyle(Color.wasiInkLight)
+                }
+
+                historyRow(title: "住所", value: shop.address ?? "情報なし")
+                historyRow(title: "予算", value: shop.budget.name ?? shop.budget.average ?? "情報なし")
+                historyRow(title: "営業時間", value: shop.open ?? "情報なし")
+                historyRow(title: "アクセス", value: shop.mobileAccess ?? "情報なし")
+                historyRow(title: "保存日時", value: entry.date.formatted(date: .abbreviated, time: .shortened))
+
+                if let detailURL = shop.hotPepperURL {
+                    Link("ホットペッパーで詳細を見る", destination: detailURL)
+                        .font(.wasiBody(14, weight: .medium))
+                        .padding(.top, 4)
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("店舗情報を読み込み中です")
+                    .font(.wasiDisplay(24))
+                    .foregroundStyle(Color.wasiInk)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .multilineTextAlignment(.center)
+
+                ZStack {
+                    Color.wasiAccentLight
+                    ProgressView().tint(Color.wasiAccent)
+                }
+                .frame(height: 220)
+                .frame(maxWidth: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.wasiBorder, lineWidth: 0.8))
+
+                historyRow(title: "保存日時", value: entry.date.formatted(date: .abbreviated, time: .shortened))
+            }
+        }
     }
 
     private func historyRow(title: String, value: String) -> some View {
