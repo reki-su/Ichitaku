@@ -25,13 +25,13 @@ private extension Color {
 }
 
 private extension Font {
-    /// 見出し：セリフ体
+    /// 見出し：やわらかめの標準書体
     static func wasiDisplay(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
-        .system(size: size, weight: weight, design: .serif)
+        .system(size: size, weight: weight)
     }
     /// 本文
     static func wasiBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .default)
+        .system(size: size, weight: weight)
     }
 }
 
@@ -49,7 +49,7 @@ struct ContentView: View {
     @State private var requiresFreeDrink: Bool = false
     @State private var requiresPrivateRoom: Bool = false
     @State private var requiresParking: Bool = false
-    @State private var requiresOpenNow: Bool = true
+    @State private var requiresOpenNow: Bool = false
     @State private var requiresMidnight: Bool = false
     @State private var requiresPet: Bool = false
     @State private var keyword: String = ""
@@ -62,6 +62,9 @@ struct ContentView: View {
     @State private var showingResult: Bool = false
     @State private var formErrorMessage: String?
     @State private var showFirstScreen: Bool = true
+    @State private var formVersion: Int = 0
+    @State private var currentWizardStep: SearchWizardStep = .keyword
+    @State private var wizardStepDirection: SearchWizardDirection = .forward
 
     var body: some View {
         NavigationStack {
@@ -76,56 +79,61 @@ struct ContentView: View {
                     FirstScreenView()
                     .transition(.opacity)
                 } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            // ── 現在地メッセージ ──
-                            if let locationMessage = locationMessageForCurrentTransport {
-                                WasiNoticeView(message: locationMessage, icon: "location.fill")
-                            }
+                    GeometryReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 20) {
+                                // ── 現在地メッセージ ──
+                                if let locationMessage = locationMessageForCurrentTransport {
+                                    WasiNoticeView(message: locationMessage, icon: "location.fill")
+                                }
 
-                            // ── 検索フォーム ──
-                            SearchConditionView(
-                            selectedTransport: $selectedTransport,
-                            selectedBudget: $selectedBudget,
-                            requiresFreeFood: $requiresFreeFood,
-                            requiresFreeDrink: $requiresFreeDrink,
-                            requiresPrivateRoom: $requiresPrivateRoom,
-                            requiresParking: $requiresParking,
-                            requiresOpenNow: $requiresOpenNow,
-                            requiresMidnight: $requiresMidnight,
-                            requiresPet: $requiresPet,
-                            keyword: $keyword,
-                                stationKeyword: $stationKeyword,
-                                stationCoordinate: $stationCoordinate,
-                                walkMaxMinutes: $walkMaxMinutes,
-                                carMaxMinutes: $carMaxMinutes,
-                                trainMaxMinutes: $trainMaxMinutes,
-                                isLoading: viewModel.isLoading,
-                                onSearch: performSearch,
-                                onFormEdit: clearFormError
-                            )
-
-                        // ── エラー表示 ──
-                        if let msg = viewModel.errorMessage {
-                            WasiNoticeView(message: msg, icon: "exclamationmark.circle", isError: true)
-                        }
-                            if let msg = formErrorMessage {
-                                WasiNoticeView(message: msg, icon: "exclamationmark.circle", isError: true)
-                            }
-
-                            NavigationLink(isActive: $showingResult) {
-                                SearchResultView(
-                                    viewModel: viewModel,
-                                    historyStore: historyStore,
-                                    selectedTransport: selectedTransport,
-                                    currentLatitude: locationService.latitude,
-                                    currentLongitude: locationService.longitude
+                                // ── 検索フォーム ──
+                                SearchConditionView(
+                                    selectedTransport: $selectedTransport,
+                                    selectedBudget: $selectedBudget,
+                                    requiresFreeFood: $requiresFreeFood,
+                                    requiresFreeDrink: $requiresFreeDrink,
+                                    requiresPrivateRoom: $requiresPrivateRoom,
+                                    requiresParking: $requiresParking,
+                                    requiresOpenNow: $requiresOpenNow,
+                                    requiresMidnight: $requiresMidnight,
+                                    requiresPet: $requiresPet,
+                                    keyword: $keyword,
+                                    currentStep: $currentWizardStep,
+                                    stepDirection: $wizardStepDirection,
+                                    stationKeyword: $stationKeyword,
+                                    stationCoordinate: $stationCoordinate,
+                                    walkMaxMinutes: $walkMaxMinutes,
+                                    carMaxMinutes: $carMaxMinutes,
+                                    trainMaxMinutes: $trainMaxMinutes,
+                                    onFormEdit: clearFormError
                                 )
-                            } label: { EmptyView() }
-                            .hidden()
+                                .id(formVersion)
+
+                                // ── エラー表示 ──
+                                if let msg = viewModel.errorMessage {
+                                    WasiNoticeView(message: msg, icon: "exclamationmark.circle", isError: true)
+                                }
+                                if let msg = formErrorMessage {
+                                    WasiNoticeView(message: msg, icon: "exclamationmark.circle", isError: true)
+                                }
+
+                                NavigationLink(isActive: $showingResult) {
+                                    SearchResultView(
+                                        viewModel: viewModel,
+                                        historyStore: historyStore,
+                                        selectedTransport: selectedTransport,
+                                        currentLatitude: locationService.latitude,
+                                        currentLongitude: locationService.longitude
+                                    )
+                                } label: { EmptyView() }
+                                .hidden()
+                            }
+                            .frame(maxWidth: .infinity, minHeight: max(proxy.size.height - 12, 0), alignment: .top)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 24)
+                            .padding(.bottom, 110)
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 24)
                     }
                 }
             }
@@ -158,6 +166,11 @@ struct ContentView: View {
                 }
             }
             .toolbarBackground(Color.wasiBackground, for: .navigationBar)
+            .safeAreaInset(edge: .bottom) {
+                if !showFirstScreen && !showingResult {
+                    wizardBottomBar
+                }
+            }
             .onChange(of: selectedTransport)      { _, _ in clearFormError() }
             .onChange(of: selectedBudget)         { _, _ in clearFormError() }
             .onChange(of: requiresFreeFood)       { _, _ in clearFormError() }
@@ -180,6 +193,81 @@ struct ContentView: View {
             return locationService.locationStatusMessage
         }
         return nil
+    }
+
+    private var wizardSteps: [SearchWizardStep] {
+        SearchWizardStep.allCases
+    }
+
+    private var isFirstWizardStep: Bool {
+        currentWizardStep == wizardSteps.first
+    }
+
+    private var isLastWizardStep: Bool {
+        currentWizardStep == wizardSteps.last
+    }
+
+    private var wizardBottomBar: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(Color.wasiBorder).frame(height: 0.5)
+            HStack(spacing: 10) {
+                Button {
+                    goPreviousWizardStep()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                        Text("戻る")
+                            .tracking(0.4)
+                    }
+                    .font(.wasiBody(14, weight: .medium))
+                    .foregroundStyle(isFirstWizardStep ? Color.wasiInkLight : Color.wasiInk)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.wasiAccentLight.opacity(isFirstWizardStep ? 0.15 : 0.28))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.wasiBorder, lineWidth: 0.7)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .disabled(isFirstWizardStep || viewModel.isLoading)
+
+                Button {
+                    if isLastWizardStep {
+                        performSearch()
+                    } else {
+                        goNextWizardStep()
+                    }
+                } label: {
+                    ZStack {
+                        if viewModel.isLoading {
+                            ProgressView()
+                                .tint(Color.wasiSurface)
+                        } else {
+                            HStack(spacing: 8) {
+                                Image(systemName: isLastWizardStep ? "cart.fill" : "arrow.right")
+                                    .font(.wasiBody(14, weight: .medium))
+                                Text(isLastWizardStep ? "注文" : "次へ")
+                                    .font(.wasiBody(15, weight: .medium))
+                                    .tracking(1)
+                            }
+                            .foregroundStyle(Color.wasiSurface)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.wasiInk)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isLoading)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+            .background(Color.wasiBackground)
+        }
     }
 
     private func performSearch() {
@@ -248,6 +336,22 @@ struct ContentView: View {
         viewModel.clearError()
     }
 
+    private func goPreviousWizardStep() {
+        guard let index = wizardSteps.firstIndex(of: currentWizardStep), index > 0 else { return }
+        wizardStepDirection = .backward
+        withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
+            currentWizardStep = wizardSteps[index - 1]
+        }
+    }
+
+    private func goNextWizardStep() {
+        guard let index = wizardSteps.firstIndex(of: currentWizardStep), index < wizardSteps.count - 1 else { return }
+        wizardStepDirection = .forward
+        withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
+            currentWizardStep = wizardSteps[index + 1]
+        }
+    }
+
     private func resetSearchConditions() {
         selectedTransport       = .walk
         selectedBudget          = .noLimit
@@ -255,7 +359,7 @@ struct ContentView: View {
         requiresFreeDrink       = false
         requiresPrivateRoom     = false
         requiresParking         = false
-        requiresOpenNow         = true
+        requiresOpenNow         = false
         requiresMidnight        = false
         requiresPet             = false
         keyword                 = ""
@@ -264,6 +368,9 @@ struct ContentView: View {
         walkMaxMinutes          = 15
         carMaxMinutes           = 30
         trainMaxMinutes         = 10
+        formVersion            += 1
+        currentWizardStep       = .keyword
+        wizardStepDirection     = .forward
         lastCondition           = nil
         formErrorMessage        = nil
         viewModel.clearError()
@@ -430,14 +537,15 @@ struct ToggleGridButton: View {
         } label: {
             HStack {
                 Image(systemName: symbol)
-                    .font(.wasiBody(12, weight: .semibold))
+                    .font(.wasiBody(13, weight: .semibold))
                 Text(title)
-                    .font(.wasiBody(13, weight: .medium))
+                    .font(.wasiBody(14, weight: .medium))
                 Spacer()
             }
             .foregroundStyle(isOn ? Color.wasiSurface : Color.wasiInk)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 13)
+            .frame(minHeight: 52)
             .background(isOn ? Color.wasiInk : Color.wasiAccentLight.opacity(0.35))
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
@@ -451,7 +559,35 @@ struct ToggleGridButton: View {
 
 // MARK: - SearchConditionView（検索フォーム）
 
+enum SearchWizardStep: Int, CaseIterable, Identifiable {
+    case keyword
+    case budget
+    case transport
+    case options
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .keyword: return "何が食べたい？"
+        case .budget: return "予算はどれくらい？"
+        case .transport: return "どうやって行く？"
+        case .options: return "こだわりはある？"
+        }
+    }
+}
+
+enum SearchWizardDirection {
+    case forward
+    case backward
+}
+
 struct SearchConditionView: View {
+    private let suggestedKeywords = [
+        "肉", "魚", "寿司", "焼肉", "居酒屋",
+        "焼き鳥", "ラーメン", "カフェ", "さっぱり", "ガッツリ"
+    ]
+
     @Binding var selectedTransport: TransportOption
     @Binding var selectedBudget: BudgetOption
     @Binding var requiresFreeFood: Bool
@@ -462,181 +598,38 @@ struct SearchConditionView: View {
     @Binding var requiresMidnight: Bool
     @Binding var requiresPet: Bool
     @Binding var keyword: String
+    @Binding var currentStep: SearchWizardStep
+    @Binding var stepDirection: SearchWizardDirection
     @Binding var stationKeyword: String
     @Binding var stationCoordinate: CLLocationCoordinate2D?
     @Binding var walkMaxMinutes: Int
     @Binding var carMaxMinutes: Int
     @Binding var trainMaxMinutes: Int
-    let isLoading: Bool
-    let onSearch: () -> Void
     let onFormEdit: () -> Void
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            stepProgress
+            wizardPage
+        }
+        .animation(.interactiveSpring(response: 0.34, dampingFraction: 0.88), value: currentStep)
+    }
+
+    private var wizardPage: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // 1) キーワード
-            VStack(alignment: .leading, spacing: 6) {
-                WasiSectionLabel(title: "キーワード")
-                TextField("例：焼肉、ラーメン、カフェ", text: $keyword)
-                    .font(.wasiBody(14))
-                    .foregroundStyle(Color.wasiInk)
-                    .padding(10)
-                    .background(Color.wasiSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(Color.wasiBorder, lineWidth: 0.5)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
+            wizardHeader
+            currentStepContent
+            currentHint
 
-            // 2) 予算
-            VStack(alignment: .leading, spacing: 6) {
-                WasiSectionLabel(title: "予算")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(BudgetOption.allCases) { option in
-                            let isSelected = selectedBudget == option
-                            Button {
-                                selectedBudget = option
-                            } label: {
-                                Text(option.shortLabel)
-                                    .font(.wasiBody(12, weight: isSelected ? .medium : .regular))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 7)
-                                    .background(isSelected ? Color.wasiInk : Color.wasiAccentLight.opacity(0.30))
-                                    .foregroundStyle(isSelected ? Color.wasiSurface : Color.wasiInk.opacity(0.75))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 3)
-                                            .stroke(isSelected ? Color.wasiInk : Color.wasiBorder, lineWidth: 0.5)
-                                    )
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-
-            // 3) 移動手段
-            WasiSegmentPicker(label: "移動手段", selection: $selectedTransport) { $0.label }
-
-            // 4) 徒歩/車/駅の詳細
-            if selectedTransport == .walk || selectedTransport == .car {
-                let binding = selectedTransport == .walk ? $walkMaxMinutes : $carMaxMinutes
-                let maxRange = selectedTransport == .walk ? 120 : 180
-                let unitLabel = selectedTransport == .walk ? "徒歩" : "車"
-                let value = selectedTransport == .walk ? walkMaxMinutes : carMaxMinutes
-
-                VStack(alignment: .leading, spacing: 6) {
-                    WasiSectionLabel(title: "\(unitLabel)の時間")
-                    HStack {
-                        Slider(value: Binding(
-                            get: { Double(value) },
-                            set: { binding.wrappedValue = Int($0) }
-                        ), in: 1...Double(maxRange), step: 1)
-                        .tint(Color.wasiAccent)
-                        Text("\(value)分以内")
-                            .font(.wasiBody(13))
-                            .foregroundStyle(Color.wasiInk)
-                            .frame(minWidth: 60, alignment: .trailing)
-                    }
-                }
-            }
-            if selectedTransport == .train {
-                VStack(alignment: .leading, spacing: 6) {
-                    WasiSectionLabel(title: "駅名")
-                    StationSearchField(
-                        stationKeyword: $stationKeyword,
-                        onSelect: { name, coordinate in
-                            stationKeyword = name
-                            stationCoordinate = coordinate
-                        },
-                        onManualEdit: {
-                            stationCoordinate = nil
-                            onFormEdit()
-                        }
-                    )
-
-                    WasiSectionLabel(title: "駅から徒歩")
-                    HStack {
-                        Slider(value: Binding(
-                            get: { Double(trainMaxMinutes) },
-                            set: { trainMaxMinutes = Int($0) }
-                        ), in: 1...30, step: 1)
-                        .tint(Color.wasiAccent)
-                        Text("\(trainMaxMinutes)分以内")
-                            .font(.wasiBody(13))
-                            .foregroundStyle(Color.wasiInk)
-                            .frame(minWidth: 72, alignment: .trailing)
-                    }
-                }
-            }
-
-            // 5) オン/オフ条件
-            VStack(alignment: .leading, spacing: 8) {
-                WasiSectionLabel(title: "こだわり条件")
-                LazyVGrid(columns: [
-                    GridItem(.flexible(), spacing: 8),
-                    GridItem(.flexible(), spacing: 8)
-                ], spacing: 8) {
-                    ToggleGridButton(title: "営業中", symbol: "sun.max", isOn: $requiresOpenNow)
-                    ToggleGridButton(title: "食べ放題", symbol: "fork.knife.circle", isOn: $requiresFreeFood)
-                    ToggleGridButton(title: "飲み放題", symbol: "wineglass", isOn: $requiresFreeDrink)
-                    ToggleGridButton(title: "個室", symbol: "door.left.hand.open", isOn: $requiresPrivateRoom)
-                    ToggleGridButton(title: "駐車場", symbol: "car.fill", isOn: $requiresParking)
-                    ToggleGridButton(title: "夜間営業", symbol: "moon.stars", isOn: $requiresMidnight)
-                    ToggleGridButton(title: "ペット可", symbol: "pawprint", isOn: $requiresPet)
-                    Color.clear.frame(height: 1)
-                }
-            }
-
-            Text(selectedTransport.searchHint(
-                walkMinutes: walkMaxMinutes,
-                carMinutes: carMaxMinutes,
-                trainMinutes: trainMaxMinutes
-            ))
-                .font(.wasiBody(12))
-                .foregroundStyle(Color.wasiInkLight)
-
-            // 区切り線
             HStack(spacing: 0) {
                 Rectangle().fill(Color.wasiBorder).frame(height: 0.5)
                 Text("◆").font(.system(size: 8)).foregroundStyle(Color.wasiBorder).padding(.horizontal, 8)
                 Rectangle().fill(Color.wasiBorder).frame(height: 0.5)
             }
             .padding(.vertical, 4)
-
-            // 検索ボタン
-            Button {
-                onSearch()
-            } label: {
-                ZStack {
-                    if isLoading {
-                        ProgressView()
-                            .tint(Color.wasiSurface)
-                    } else {
-                        HStack(spacing: 8) {
-                            Image(systemName: "cart.fill")
-                                .font(.wasiBody(14, weight: .medium))
-                            Text("注文")
-                                .font(.wasiBody(15, weight: .medium))
-                                .tracking(1)
-                            Text("→")
-                                .font(.wasiBody(15))
-                        }
-                        .foregroundStyle(Color.wasiSurface)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.wasiInk)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
-            .buttonStyle(.plain)
-            .disabled(isLoading)
-
         }
-        .padding(18)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 24)
         .background(Color.wasiSurface)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.wasiBorder, lineWidth: 1.2))
         .overlay(
@@ -645,20 +638,366 @@ struct SearchConditionView: View {
                 .stroke(Color.wasiBorder.opacity(0.9), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(alignment: .topLeading) { formCornerFlourish().offset(x: 10, y: 10) }
-        .overlay(alignment: .topTrailing) { formCornerFlourish().scaleEffect(x: -1, y: 1).offset(x: -10, y: 10) }
-        .overlay(alignment: .bottomLeading) { formCornerFlourish().rotationEffect(.degrees(180)).offset(x: 10, y: -10) }
-        .overlay(alignment: .bottomTrailing) { formCornerFlourish().rotationEffect(.degrees(180)).scaleEffect(x: -1, y: 1).offset(x: -10, y: -10) }
+        .overlay(alignment: .topLeading) { formCornerFlourish().offset(x: 6, y: 6) }
+        .overlay(alignment: .topTrailing) { formCornerFlourish().scaleEffect(x: -1, y: 1).offset(x: -6, y: 6) }
+        .overlay(alignment: .bottomLeading) { formCornerFlourish().rotationEffect(.degrees(180)).offset(x: 6, y: -6) }
+        .overlay(alignment: .bottomTrailing) { formCornerFlourish().rotationEffect(.degrees(180)).scaleEffect(x: -1, y: 1).offset(x: -6, y: -6) }
+        .overlay(alignment: stepDirection == .forward ? .trailing : .leading) {
+            LinearGradient(
+                colors: [
+                    Color.wasiInk.opacity(0.08),
+                    Color.wasiInk.opacity(0.02),
+                    .clear
+                ],
+                startPoint: stepDirection == .forward ? .trailing : .leading,
+                endPoint: stepDirection == .forward ? .leading : .trailing
+            )
+            .frame(width: 18)
+            .allowsHitTesting(false)
+        }
+        .id(currentStep)
+        .transition(stepTransition)
+        .rotationEffect(.degrees(stepDirection == .forward ? 0.35 : -0.35), anchor: stepDirection == .forward ? .leading : .trailing)
+    }
+
+    private var allSteps: [SearchWizardStep] {
+        SearchWizardStep.allCases
+    }
+
+    @ViewBuilder
+    private var wizardHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: stepSymbol(for: currentStep))
+                    .font(.wasiBody(12, weight: .semibold))
+                    .foregroundStyle(Color.wasiSurface)
+                    .frame(width: 24, height: 24)
+                    .background(Color.wasiAccent)
+                    .clipShape(Circle())
+
+                Text("検索条件")
+                    .font(.wasiBody(11))
+                    .foregroundStyle(Color.wasiAccent)
+                    .tracking(1.1)
+            }
+
+            Text(currentStep.title)
+                .font(.wasiDisplay(24, weight: .semibold))
+                .foregroundStyle(Color.wasiInk)
+        }
+    }
+
+    private var stepProgress: some View {
+        HStack(spacing: 8) {
+            ForEach(allSteps) { step in
+                HStack(spacing: 6) {
+                    Image(systemName: stepSymbol(for: step))
+                        .font(.wasiBody(10, weight: .semibold))
+                        .foregroundStyle(step.rawValue <= currentStep.rawValue ? Color.wasiSurface : Color.wasiAccent)
+                        .frame(width: 20, height: 20)
+                        .background(step.rawValue <= currentStep.rawValue ? Color.wasiAccent : Color.wasiAccentLight.opacity(0.75))
+                        .clipShape(Circle())
+
+                    Capsule()
+                        .fill(step.rawValue <= currentStep.rawValue ? Color.wasiAccent : Color.wasiAccentLight.opacity(0.6))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 6)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var currentStepContent: some View {
+        Group {
+            switch currentStep {
+            case .keyword:
+                keywordStep
+            case .budget:
+                budgetStep
+            case .transport:
+                transportStep
+            case .options:
+                optionsStep
+            }
+        }
+    }
+
+    private var keywordStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WasiSectionLabel(title: "人気のキーワード")
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
+                ForEach(suggestedKeywords, id: \.self) { item in
+                    let isSelected = keyword == item
+                    Button {
+                        keyword = item
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: keywordSymbol(for: item))
+                                .font(.system(size: 11, weight: .semibold))
+                            Text(item)
+                                .font(.wasiBody(14, weight: .medium))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(isSelected ? Color.wasiAccent : Color.wasiAccentLight.opacity(0.32))
+                        .foregroundStyle(isSelected ? Color.wasiSurface : Color.wasiInk)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(isSelected ? Color.wasiAccent : Color.wasiBorder, lineWidth: 0.8)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("こだわる人だけ文字入力")
+                    .font(.wasiBody(11, weight: .medium))
+                    .foregroundStyle(Color.wasiInkLight)
+
+                TextField("例：パン、韓国料理、キーマカレー", text: $keyword)
+                    .font(.wasiBody(17))
+                    .foregroundStyle(Color.wasiInk)
+                    .padding(14)
+                    .background(Color.wasiSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.wasiBorder, lineWidth: 0.8)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private var budgetStep: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            WasiSectionLabel(title: "予算")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 8)], spacing: 8) {
+                ForEach(BudgetOption.allCases) { option in
+                    let isSelected = selectedBudget == option
+                    Button {
+                        selectedBudget = option
+                    } label: {
+                        Text(option.shortLabel)
+                            .font(.wasiBody(13, weight: isSelected ? .medium : .regular))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(isSelected ? Color.wasiInk : Color.wasiAccentLight.opacity(0.30))
+                            .foregroundStyle(isSelected ? Color.wasiSurface : Color.wasiInk.opacity(0.8))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(isSelected ? Color.wasiInk : Color.wasiBorder, lineWidth: 0.7)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var transportStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WasiSectionLabel(title: "移動手段")
+            VStack(spacing: 10) {
+                ForEach(TransportOption.allCases) { option in
+                    Button {
+                        selectedTransport = option
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: transportSymbol(for: option))
+                                .font(.wasiBody(18, weight: .medium))
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(option.label)
+                                    .font(.wasiBody(15, weight: .medium))
+                                Text(transportDescription(for: option))
+                                    .font(.wasiBody(12))
+                                    .foregroundStyle(selectedTransport == option ? Color.wasiSurface.opacity(0.82) : Color.wasiInkLight)
+                            }
+                            Spacer()
+                            if selectedTransport == option {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.wasiBody(16))
+                            }
+                        }
+                        .foregroundStyle(selectedTransport == option ? Color.wasiSurface : Color.wasiInk)
+                        .padding(14)
+                        .background(selectedTransport == option ? Color.wasiInk : Color.wasiAccentLight.opacity(0.28))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(selectedTransport == option ? Color.wasiInk : Color.wasiBorder, lineWidth: 0.8)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Divider()
+                .overlay(Color.wasiBorder)
+                .padding(.vertical, 2)
+
+            transportDetailSection
+        }
+    }
+
+    @ViewBuilder
+    private var transportDetailSection: some View {
+        switch selectedTransport {
+        case .walk, .car:
+            let binding = selectedTransport == .walk ? $walkMaxMinutes : $carMaxMinutes
+            let maxRange = selectedTransport == .walk ? 120 : 60
+            let title = selectedTransport == .walk ? "徒歩の時間" : "車の時間"
+            let value = selectedTransport == .walk ? walkMaxMinutes : carMaxMinutes
+
+            VStack(alignment: .leading, spacing: 12) {
+                WasiSectionLabel(title: title)
+                Text("\(value)分以内")
+                    .font(.wasiDisplay(28, weight: .semibold))
+                    .foregroundStyle(Color.wasiInk)
+                Slider(
+                    value: Binding(
+                        get: { Double(value) },
+                        set: { binding.wrappedValue = Int($0) }
+                    ),
+                    in: 5...Double(maxRange),
+                    step: 5
+                )
+                .tint(Color.wasiAccent)
+            }
+        case .train:
+            VStack(alignment: .leading, spacing: 12) {
+                WasiSectionLabel(title: "駅名")
+                StationSearchField(
+                    stationKeyword: $stationKeyword,
+                    onSelect: { name, coordinate in
+                        stationKeyword = name
+                        stationCoordinate = coordinate
+                    },
+                    onManualEdit: {
+                        stationCoordinate = nil
+                        onFormEdit()
+                    }
+                )
+
+                WasiSectionLabel(title: "駅から徒歩")
+                Text("\(trainMaxMinutes)分以内")
+                    .font(.wasiDisplay(28, weight: .semibold))
+                    .foregroundStyle(Color.wasiInk)
+                Slider(
+                    value: Binding(
+                        get: { Double(trainMaxMinutes) },
+                        set: { trainMaxMinutes = Int($0) }
+                    ),
+                    in: 5...30,
+                    step: 5
+                )
+                .tint(Color.wasiAccent)
+            }
+        }
+    }
+
+    private var optionsStep: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            WasiSectionLabel(title: "こだわり条件")
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8)
+            ], spacing: 8) {
+                ToggleGridButton(title: "営業中", symbol: "sun.max", isOn: $requiresOpenNow)
+                ToggleGridButton(title: "食べ放題", symbol: "fork.knife.circle", isOn: $requiresFreeFood)
+                ToggleGridButton(title: "飲み放題", symbol: "wineglass", isOn: $requiresFreeDrink)
+                ToggleGridButton(title: "個室", symbol: "door.left.hand.open", isOn: $requiresPrivateRoom)
+                ToggleGridButton(title: "駐車場", symbol: "car.fill", isOn: $requiresParking)
+                ToggleGridButton(title: "夜間営業", symbol: "moon.stars", isOn: $requiresMidnight)
+                ToggleGridButton(title: "ペット可", symbol: "pawprint", isOn: $requiresPet)
+            }
+        }
+    }
+
+    private var currentHint: some View {
+        Group {
+            if currentStep == .transport {
+                Text(selectedTransport.searchHint(
+                    walkMinutes: walkMaxMinutes,
+                    carMinutes: carMaxMinutes,
+                    trainMinutes: trainMaxMinutes
+                ))
+                .font(.wasiBody(12))
+                .foregroundStyle(Color.wasiInkLight)
+            }
+        }
+    }
+
+    private var stepTransition: AnyTransition {
+        let insertionEdge: Edge = stepDirection == .forward ? .trailing : .leading
+        let removalEdge: Edge = stepDirection == .forward ? .leading : .trailing
+
+        return .asymmetric(
+            insertion: .move(edge: insertionEdge)
+                .combined(with: .opacity)
+                .combined(with: .scale(scale: 0.98, anchor: stepDirection == .forward ? .trailing : .leading)),
+            removal: .move(edge: removalEdge)
+                .combined(with: .opacity)
+        )
+    }
+
+    private func transportSymbol(for option: TransportOption) -> String {
+        switch option {
+        case .walk: return "figure.walk"
+        case .car: return "car.fill"
+        case .train: return "tram.fill"
+        }
+    }
+
+    private func transportDescription(for option: TransportOption) -> String {
+        switch option {
+        case .walk: return "今いる場所から歩ける範囲で探します"
+        case .car: return "少し広めに探したいときに向いています"
+        case .train: return "選んだ駅を起点にお店を探します"
+        }
+    }
+
+    private func stepSymbol(for step: SearchWizardStep) -> String {
+        switch step {
+        case .keyword: return "fork.knife"
+        case .budget: return "yensign.circle"
+        case .transport: return "car.front.waves.up"
+        case .options: return "slider.horizontal.3"
+        }
+    }
+
+    private func keywordSymbol(for item: String) -> String {
+        switch item {
+        case "肉", "焼肉", "ガッツリ":
+            return "flame.fill"
+        case "魚", "寿司":
+            return "fish.fill"
+        case "居酒屋", "焼き鳥":
+            return "wineglass.fill"
+        case "ラーメン":
+            return "takeoutbag.and.cup.and.straw.fill"
+        case "カフェ":
+            return "cup.and.saucer.fill"
+        case "さっぱり":
+            return "leaf.fill"
+        default:
+            return "fork.knife"
+        }
     }
 
     private func formCornerFlourish() -> some View {
         HStack(spacing: 2) {
             Image(systemName: "leaf")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
             Image(systemName: "leaf.fill")
-                .font(.system(size: 8, weight: .semibold))
+                .font(.system(size: 7, weight: .semibold))
         }
-        .foregroundStyle(Color.wasiAccent.opacity(0.68))
+        .foregroundStyle(Color.wasiAccent.opacity(0.55))
     }
 }
 
@@ -702,7 +1041,8 @@ struct SearchResultView: View {
     let selectedTransport: TransportOption
     let currentLatitude: Double?
     let currentLongitude: Double?
-    @State private var decidedShop: Shop?
+    @State private var autoSavedEntryID: UUID?
+    @State private var autoSavedShopID: String?
 
     var body: some View {
         ZStack {
@@ -804,40 +1144,32 @@ struct SearchResultView: View {
                     .buttonStyle(.plain)
                     .disabled(!viewModel.canReroll)
 
-                    // 決定ボタン（右）
-                    Button {
-                        guard let shop = viewModel.currentShop else { return }
-                        historyStore.add(shop: shop)
-                        decidedShop = shop
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.wasiBody(13, weight: .semibold))
-                            Text("ここに決める")
-                                .font(.wasiBody(15, weight: .bold))
-                        }
-                        .tracking(1)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .background(Color.wasiVermilion)
-                        .foregroundStyle(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(viewModel.currentShop == nil)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-                .padding(.bottom, 16)
+                .padding(.bottom, 28)
                 .background(Color.wasiBackground)
             }
         }
-        .sheet(item: $decidedShop) { shop in
-            DecisionCelebrationView(shop: shop)
+        .task(id: viewModel.currentShop?.id) {
+            syncVisibleShopIntoHistory()
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.wasiBackground, for: .navigationBar)
+    }
+
+    private func syncVisibleShopIntoHistory() {
+        guard let shop = viewModel.currentShop else { return }
+        guard autoSavedShopID != shop.id else { return }
+
+        if let previousEntryID = autoSavedEntryID {
+            historyStore.remove(entryID: previousEntryID)
+        }
+
+        let newEntryID = historyStore.add(shop: shop)
+        autoSavedEntryID = newEntryID
+        autoSavedShopID = shop.id
     }
 
     private func estimatedAccessText(for shop: Shop) -> String? {
@@ -970,14 +1302,25 @@ struct ShopCardView: View {
                 .font(.wasiBody(10))
                 .foregroundStyle(Color.wasiInkLight)
 
-            menuLine(title: "キャッチコピー", value: shop.shopCatch ?? "情報なし")
-            menuLine(title: "住所", value: shop.address ?? "情報なし")
-            menuLine(title: "アクセス", value: accessText ?? (shop.mobileAccess ?? "情報なし"))
-            menuLine(title: "予算", value: shop.budget.name ?? "情報なし")
-            menuLine(title: "営業時間", value: shop.open ?? "情報なし")
+            if let catchCopy = displayableText(shop.shopCatch) {
+                menuLine(title: "キャッチコピー", value: catchCopy)
+            }
+            if let address = displayableText(shop.address) {
+                menuLine(title: "住所", value: address)
+            }
+            if let access = displayableText(accessText ?? shop.mobileAccess) {
+                menuLine(title: "アクセス", value: access)
+            }
+            if let budget = displayableText(shop.budget.name) {
+                menuLine(title: "予算", value: budget)
+            }
+            if let open = displayableText(shop.open) {
+                menuLine(title: "営業時間", value: open)
+            }
 
         }
-        .padding(18)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 24)
         .background(
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color.wasiAccentLight.opacity(0.26))
@@ -992,35 +1335,44 @@ struct ShopCardView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .shadow(color: Color.wasiInk.opacity(0.10), radius: 10, x: 0, y: 5)
-        .overlay(alignment: .topLeading) { cornerFlourish().offset(x: 10, y: 10) }
-        .overlay(alignment: .topTrailing) { cornerFlourish().scaleEffect(x: -1, y: 1).offset(x: -10, y: 10) }
-        .overlay(alignment: .bottomLeading) { cornerFlourish().rotationEffect(.degrees(180)).offset(x: 10, y: -10) }
-        .overlay(alignment: .bottomTrailing) { cornerFlourish().rotationEffect(.degrees(180)).scaleEffect(x: -1, y: 1).offset(x: -10, y: -10) }
+        .overlay(alignment: .topLeading) { cornerFlourish().offset(x: 6, y: 6) }
+        .overlay(alignment: .topTrailing) { cornerFlourish().scaleEffect(x: -1, y: 1).offset(x: -6, y: 6) }
+        .overlay(alignment: .bottomLeading) { cornerFlourish().rotationEffect(.degrees(180)).offset(x: 6, y: -6) }
+        .overlay(alignment: .bottomTrailing) { cornerFlourish().rotationEffect(.degrees(180)).scaleEffect(x: -1, y: 1).offset(x: -6, y: -6) }
     }
 
     private func menuLine(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.wasiBody(12, weight: .medium))
-                .foregroundStyle(Color.wasiInk.opacity(0.75))
+                .font(.wasiBody(11, weight: .medium))
+                .foregroundStyle(Color.wasiInkLight)
+                .tracking(0.6)
             Text(value)
-                .font(.wasiBody(14))
+                .font(.wasiBody(16, weight: .semibold))
                 .foregroundStyle(Color.wasiInk)
-                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             Rectangle()
                 .fill(Color.wasiBorder.opacity(0.7))
                 .frame(height: 0.8)
         }
     }
 
+    private func displayableText(_ text: String?) -> String? {
+        guard let raw = text?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        let hiddenValues = ["情報なし", "未設定", "未登録", "-"]
+        return hiddenValues.contains(raw) ? nil : raw
+    }
+
     private func cornerFlourish() -> some View {
         HStack(spacing: 2) {
             Image(systemName: "leaf")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
             Image(systemName: "leaf.fill")
-                .font(.system(size: 8, weight: .semibold))
+                .font(.system(size: 7, weight: .semibold))
         }
-        .foregroundStyle(Color.wasiAccent.opacity(0.68))
+        .foregroundStyle(Color.wasiAccent.opacity(0.55))
     }
 }
 
@@ -1225,7 +1577,8 @@ final class SearchHistoryStore {
         load()
     }
 
-    func add(shop: Shop) {
+    @discardableResult
+    func add(shop: Shop) -> UUID {
         entries.removeAll { $0.shopID == shop.id }
         let entry = HistoryEntry(
             date: Date(),
@@ -1243,6 +1596,12 @@ final class SearchHistoryStore {
             lng: shop.lng
         )
         entries.insert(entry, at: 0)
+        save()
+        return entry.id
+    }
+
+    func remove(entryID: UUID) {
+        entries.removeAll { $0.id == entryID }
         save()
     }
 
@@ -1279,11 +1638,6 @@ struct HistoryEntry: Identifiable, Codable {
 
 struct HistoryListView: View {
     @Bindable var historyStore: SearchHistoryStore
-    @State private var selectedMapPointID: UUID?
-    @State private var historyMapRegion = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 35.681236, longitude: 139.767125),
-        span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
-    )
 
     var body: some View {
         ScrollView {
@@ -1294,51 +1648,6 @@ struct HistoryListView: View {
                         .foregroundStyle(Color.wasiInkLight)
                         .padding(.top, 24)
                 } else {
-                    if !mapPoints.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("保存した場所")
-                                .font(.wasiDisplay(20))
-                                .foregroundStyle(Color.wasiInk)
-
-                            Map(
-                                coordinateRegion: $historyMapRegion,
-                                annotationItems: mapPoints
-                            ) { point in
-                                MapAnnotation(coordinate: point.coordinate) {
-                                    VStack(spacing: 4) {
-                                        if selectedMapPointID == point.id {
-                                            Text(point.title)
-                                                .font(.wasiBody(11, weight: .medium))
-                                                .foregroundStyle(Color.wasiInk)
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 5)
-                                                .background(Color.wasiSurface)
-                                                .clipShape(Capsule())
-                                                .overlay(
-                                                    Capsule()
-                                                        .stroke(Color.wasiBorder, lineWidth: 0.8)
-                                                )
-                                        }
-                                        Button {
-                                            selectedMapPointID = selectedMapPointID == point.id ? nil : point.id
-                                        } label: {
-                                            Image(systemName: "fork.knife.circle.fill")
-                                                .font(.system(size: 20))
-                                                .foregroundStyle(Color.wasiVermilion)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                            .frame(height: 220)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.wasiBorder, lineWidth: 1)
-                            )
-                        }
-                    }
-
                     VStack(alignment: .leading, spacing: 6) {
                         Text("保存したお店")
                             .font(.wasiDisplay(24))
@@ -1362,12 +1671,11 @@ struct HistoryListView: View {
                                 ],
                                 spacing: 12
                             ) {
-                                ForEach(Array(section.entries.enumerated()), id: \.element.id) { index, entry in
+                                ForEach(section.entries, id: \.id) { entry in
                                     NavigationLink {
                                         HistoryDetailView(entry: entry)
                                     } label: {
                                         HistoryMenuCard(entry: entry)
-                                            .rotationEffect(.degrees(index.isMultiple(of: 2) ? -0.5 : 0.5))
                                     }
                                     .buttonStyle(.plain)
                                 }
@@ -1382,40 +1690,6 @@ struct HistoryListView: View {
         .background(Color.wasiBackground.ignoresSafeArea())
         .navigationTitle("履歴")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            historyMapRegion = historyRegion
-        }
-        .onChange(of: historyStore.entries.count) { _, _ in
-            historyMapRegion = historyRegion
-        }
-    }
-
-    private var mapPoints: [HistoryMapPoint] {
-        let entriesWithCoordinates = historyStore.entries.compactMap { entry -> HistoryEntry? in
-            guard entry.lat != nil, entry.lng != nil else { return nil }
-            return entry
-        }
-        let grouped = Dictionary(grouping: entriesWithCoordinates) { entry in
-            "\(entry.lat ?? 0),\(entry.lng ?? 0)"
-        }
-
-        return entriesWithCoordinates.enumerated().compactMap { _, entry in
-            guard let lat = entry.lat, let lng = entry.lng else { return nil }
-            let key = "\(lat),\(lng)"
-            let siblings = grouped[key] ?? [entry]
-            let siblingIndex = siblings.firstIndex(where: { $0.id == entry.id }) ?? 0
-            let adjusted = offsetCoordinate(
-                latitude: lat,
-                longitude: lng,
-                index: siblingIndex,
-                total: siblings.count
-            )
-            return HistoryMapPoint(
-                id: entry.id,
-                title: entry.shopName,
-                coordinate: adjusted
-            )
-        }
     }
 
     private var groupedEntries: [HistoryMonthSection] {
@@ -1438,53 +1712,6 @@ struct HistoryListView: View {
             )
         }
     }
-
-    private var historyRegion: MKCoordinateRegion {
-        guard !mapPoints.isEmpty else {
-            return MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 35.681236, longitude: 139.767125),
-                span: MKCoordinateSpan(latitudeDelta: 0.2, longitudeDelta: 0.2)
-            )
-        }
-
-        let latitudes = mapPoints.map { $0.coordinate.latitude }
-        let longitudes = mapPoints.map { $0.coordinate.longitude }
-        let center = CLLocationCoordinate2D(
-            latitude: latitudes.reduce(0, +) / Double(latitudes.count),
-            longitude: longitudes.reduce(0, +) / Double(longitudes.count)
-        )
-        let latDelta = max((latitudes.max() ?? center.latitude) - (latitudes.min() ?? center.latitude), 0.02) * 1.8
-        let lngDelta = max((longitudes.max() ?? center.longitude) - (longitudes.min() ?? center.longitude), 0.02) * 1.8
-        return MKCoordinateRegion(
-            center: center,
-            span: MKCoordinateSpan(latitudeDelta: latDelta, longitudeDelta: lngDelta)
-        )
-    }
-
-    private func offsetCoordinate(
-        latitude: Double,
-        longitude: Double,
-        index: Int,
-        total: Int
-    ) -> CLLocationCoordinate2D {
-        guard total > 1 else {
-            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-        }
-        let angle = (Double(index) / Double(max(total, 1))) * (2.0 * .pi)
-        let radius = 0.00018
-        let latOffset = sin(angle) * radius
-        let lngOffset = cos(angle) * radius
-        return CLLocationCoordinate2D(
-            latitude: latitude + latOffset,
-            longitude: longitude + lngOffset
-        )
-    }
-}
-
-private struct HistoryMapPoint: Identifiable {
-    let id: UUID
-    let title: String
-    let coordinate: CLLocationCoordinate2D
 }
 
 private struct HistoryMonthSection {
@@ -1497,61 +1724,50 @@ struct HistoryMenuCard: View {
     let entry: HistoryEntry
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 12) {
-                Circle().fill(Color.wasiBorder.opacity(0.9)).frame(width: 8, height: 8)
-                Circle().fill(Color.wasiBorder.opacity(0.9)).frame(width: 8, height: 8)
-                Circle().fill(Color.wasiBorder.opacity(0.9)).frame(width: 8, height: 8)
-                Circle().fill(Color.wasiBorder.opacity(0.9)).frame(width: 8, height: 8)
-            }
-            .frame(width: 22)
-            .padding(.vertical, 18)
-            .background(Color.wasiAccentLight.opacity(0.45))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
+                dateBadge
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("MENU BOOK")
-                        .font(.wasiBody(9, weight: .semibold))
-                        .foregroundStyle(Color.wasiAccent)
-                        .tracking(2)
-                    Spacer()
-                    Text(entry.date.formatted(date: .numeric, time: .shortened))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.shopName)
+                        .font(.wasiDisplay(18, weight: .semibold))
+                        .foregroundStyle(Color.wasiInk)
+                        .lineLimit(2)
+
+                    Text(entry.date.formatted(date: .abbreviated, time: .shortened))
                         .font(.wasiBody(10))
                         .foregroundStyle(Color.wasiAccent)
                 }
+                Spacer()
+            }
 
-                Text(entry.shopName)
-                    .font(.wasiDisplay(18))
-                    .foregroundStyle(Color.wasiInk)
-                    .lineLimit(2)
-
-                AsyncImage(url: URL(string: entry.photoURL ?? "")) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    default:
-                        Color.wasiAccentLight
-                    }
-                }
-                .frame(height: 96)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.wasiBorder, lineWidth: 0.6))
-
-                historyMiniLine(title: "住所", value: entry.address ?? "住所情報なし")
-                historyMiniLine(title: "予算", value: entry.budget ?? "情報なし")
-
-                HStack {
-                    Spacer()
-                    Text("詳細を見る")
-                        .font(.wasiBody(11, weight: .medium))
-                        .foregroundStyle(Color.wasiAccent)
+            AsyncImage(url: URL(string: entry.photoURL ?? "")) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                default:
+                    Color.wasiAccentLight
                 }
             }
-            .padding(12)
+            .frame(height: 110)
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.wasiBorder, lineWidth: 0.6))
+
+            historyMiniLine(title: "住所", value: entry.address ?? "住所情報なし", symbol: "mappin.and.ellipse")
+
+            HStack(spacing: 6) {
+                Spacer()
+                Text("詳細を見る")
+                    .font(.wasiBody(11, weight: .medium))
+                    .foregroundStyle(Color.wasiAccent)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.wasiAccent)
+            }
         }
+        .padding(14)
         .background(Color.wasiSurface)
-        .overlay(Rectangle().fill(Color.wasiBorder.opacity(0.65)).frame(width: 0.8), alignment: .leading)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.wasiBorder, lineWidth: 1.1))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
@@ -1559,28 +1775,45 @@ struct HistoryMenuCard: View {
                 .stroke(Color.wasiBorder.opacity(0.85), lineWidth: 0.9)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(alignment: .topLeading) { miniFlourish().offset(x: 30, y: 8) }
-        .overlay(alignment: .topTrailing) { miniFlourish().scaleEffect(x: -1, y: 1).offset(x: -8, y: 8) }
-        .overlay(alignment: .bottomLeading) { miniFlourish().rotationEffect(.degrees(180)).offset(x: 30, y: -8) }
-        .overlay(alignment: .bottomTrailing) { miniFlourish().rotationEffect(.degrees(180)).scaleEffect(x: -1, y: 1).offset(x: -8, y: -8) }
-        .shadow(color: Color.wasiInk.opacity(0.08), radius: 8, x: 0, y: 4)
+        .overlay(alignment: .topTrailing) { miniFlourish().scaleEffect(x: -1, y: 1).offset(x: -6, y: 6) }
+        .overlay(alignment: .bottomTrailing) { miniFlourish().rotationEffect(.degrees(180)).scaleEffect(x: -1, y: 1).offset(x: -6, y: -6) }
+    }
+
+    private var dateBadge: some View {
+        VStack(spacing: 2) {
+            Text(entry.date.formatted(.dateTime.day()))
+                .font(.wasiBody(16, weight: .semibold))
+                .foregroundStyle(Color.wasiSurface)
+            Text(entry.date.formatted(.dateTime.month(.abbreviated)))
+                .font(.wasiBody(9, weight: .medium))
+                .foregroundStyle(Color.wasiSurface.opacity(0.92))
+                .textCase(.uppercase)
+        }
+        .frame(width: 42, height: 48)
+        .background(Color.wasiAccent)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func miniFlourish() -> some View {
         HStack(spacing: 1) {
             Image(systemName: "leaf")
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 8, weight: .semibold))
             Image(systemName: "leaf.fill")
-                .font(.system(size: 7, weight: .semibold))
+                .font(.system(size: 6, weight: .semibold))
         }
-        .foregroundStyle(Color.wasiAccent.opacity(0.62))
+        .foregroundStyle(Color.wasiAccent.opacity(0.52))
     }
 
-    private func historyMiniLine(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.wasiBody(10, weight: .medium))
-                .foregroundStyle(Color.wasiAccent)
+    private func historyMiniLine(title: String, value: String, symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.wasiAccent)
+                Text(title)
+                    .font(.wasiBody(10, weight: .medium))
+                    .foregroundStyle(Color.wasiAccent)
+            }
             Text(value)
                 .font(.wasiBody(11))
                 .foregroundStyle(Color.wasiInk)
@@ -1624,7 +1857,8 @@ struct HistoryDetailView: View {
                     historyRow(title: "アクセス", value: entry.access ?? "情報なし")
                     historyRow(title: "保存日時", value: entry.date.formatted(date: .abbreviated, time: .shortened))
                 }
-                .padding(16)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 22)
                 .background(Color.wasiSurface)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.wasiBorder, lineWidth: 1.2))
                 .overlay(
@@ -1633,10 +1867,10 @@ struct HistoryDetailView: View {
                         .stroke(Color.wasiBorder.opacity(0.9), lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(alignment: .topLeading) { miniFlourish().offset(x: 10, y: 10) }
-                .overlay(alignment: .topTrailing) { miniFlourish().scaleEffect(x: -1, y: 1).offset(x: -10, y: 10) }
-                .overlay(alignment: .bottomLeading) { miniFlourish().rotationEffect(.degrees(180)).offset(x: 10, y: -10) }
-                .overlay(alignment: .bottomTrailing) { miniFlourish().rotationEffect(.degrees(180)).scaleEffect(x: -1, y: 1).offset(x: -10, y: -10) }
+                .overlay(alignment: .topLeading) { miniFlourish().offset(x: 6, y: 6) }
+                .overlay(alignment: .topTrailing) { miniFlourish().scaleEffect(x: -1, y: 1).offset(x: -6, y: 6) }
+                .overlay(alignment: .bottomLeading) { miniFlourish().rotationEffect(.degrees(180)).offset(x: 6, y: -6) }
+                .overlay(alignment: .bottomTrailing) { miniFlourish().rotationEffect(.degrees(180)).scaleEffect(x: -1, y: 1).offset(x: -6, y: -6) }
 
                 if let mapURLString = entry.mapURL, let mapURL = URL(string: mapURLString) {
                     if let lat = entry.lat, let lng = entry.lng {

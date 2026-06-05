@@ -79,12 +79,6 @@ final class ShopRouletteViewModel {
         if condition.transport == .train {
             attempts.append(conditionForTrain(base: condition, keepOnlyStationKeyword: true))
             attempts.append(conditionForTrain(base: condition, keepOnlyMainKeyword: true))
-        } else if condition.transport == .car {
-            // 車検索は最後に位置条件を外して広域検索を試す。
-            attempts.append(relaxedCondition(base: condition, removeLocation: true, removeOptionFilters: true))
-        } else if condition.transport == .walk {
-            // 徒歩検索も最終的には位置条件を外して救済する。
-            attempts.append(relaxedCondition(base: condition, removeLocation: true, removeOptionFilters: true))
         }
 
         for attempt in attempts {

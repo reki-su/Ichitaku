@@ -239,6 +239,24 @@ struct Shop: Codable, Identifiable {
         return dayPart.contains(todaySymbol)
     }
 
+    /// アクセス文から駅近かどうかを簡易判定します。
+    func isNearStation(maxMinutes: Int = 5) -> Bool {
+        guard let mobileAccess, !mobileAccess.isEmpty else { return false }
+        guard mobileAccess.contains("徒歩") else { return false }
+
+        let pattern = #"徒歩\s*(\d+)\s*分"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let nsText = mobileAccess as NSString
+        let matches = regex.matches(in: mobileAccess, range: NSRange(location: 0, length: nsText.length))
+        for match in matches where match.numberOfRanges >= 2 {
+            let value = nsText.substring(with: match.range(at: 1))
+            if let minutes = Int(value), minutes <= maxMinutes {
+                return true
+            }
+        }
+        return false
+    }
+
     /// デザイン確認用のモックデータです。
     static let mockShops: [Shop] = [
         Shop(

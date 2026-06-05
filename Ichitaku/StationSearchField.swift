@@ -19,7 +19,7 @@ struct StationSearchField: View {
                 Image(systemName: "tram.fill")
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
-                TextField("駅名（例: 豊田市、渋谷）", text: $stationKeyword)
+                TextField("駅名（例: 新宿、渋谷）", text: $stationKeyword)
                     .autocorrectionDisabled()
                     .onChange(of: stationKeyword) { _, newValue in
                         // 候補から選んだ直後は再検索しない
