@@ -23,12 +23,15 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     var locationStatusMessage: String? {
         switch authorizationStatus {
         case .notDetermined:
-            return "位置情報を許可すると、徒歩・車検索の精度が上がります。"
+            return "位置情報を許可すると、徒歩・車検索が使えます。許可しなくても電車・駅検索は使えます。"
         case .restricted, .denied:
-            return "位置情報がオフのため、徒歩・車検索は現在地なしで実行します。設定アプリから許可できます。"
+            return "位置情報がオフのため、徒歩・車検索は使えません。設定アプリから許可すると使えます。"
         case .authorizedAlways, .authorizedWhenInUse:
-            if latitude == nil || longitude == nil {
-                return "現在地を取得中です。少し待ってから検索すると近くのお店が出やすくなります。"
+            if !hasResolvedLocation {
+                return "現在地を取得中です。取得できると徒歩・車検索が使えます。"
+            }
+            if !isLocationInJapan {
+                return "現在地が日本外のため、徒歩・車検索は使えません。電車・駅検索を使ってください。"
             }
             return nil
         @unknown default:
@@ -41,6 +44,23 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         if authorizationStatus == .notDetermined {
             manager.requestWhenInUseAuthorization()
         }
+    }
+
+    var isAuthorizedForLocation: Bool {
+        authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways
+    }
+
+    var hasResolvedLocation: Bool {
+        latitude != nil && longitude != nil
+    }
+
+    var canUseNearbySearch: Bool {
+        isAuthorizedForLocation && hasResolvedLocation && isLocationInJapan
+    }
+
+    private var isLocationInJapan: Bool {
+        guard let latitude, let longitude else { return false }
+        return (20.0...46.5).contains(latitude) && (122.0...154.5).contains(longitude)
     }
 
     /// 現在地の更新を開始します。

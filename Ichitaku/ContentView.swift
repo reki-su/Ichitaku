@@ -43,7 +43,7 @@ struct ContentView: View {
     @State private var historyStore = SearchHistoryStore()
     private let stationResolver = StationResolver()
 
-    @State private var selectedTransport: TransportOption = .walk
+    @State private var selectedTransport: TransportOption = .train
     @State private var selectedBudget: BudgetOption = .noLimit
     @State private var requiresFreeFood: Bool = false
     @State private var requiresFreeDrink: Bool = false
@@ -68,124 +68,201 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
+            navigationContent
+        }
+    }
+
+    private var navigationContent: AnyView {
+        AnyView(
+            rootContent
+            .onAppear(perform: handleOnAppear)
+            .task {
+                await handleSplashTask()
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { topToolbarContent }
+            .toolbarBackground(Color.wasiBackground, for: .navigationBar)
+            .safeAreaInset(edge: .bottom) { bottomBarContent }
+            .onChange(of: formStateSignature) { _, _ in
+                clearFormError()
+            }
+            .onChange(of: locationStateSignature) { _, _ in
+                syncTransportSelectionWithLocationAvailability()
+            }
+        )
+    }
+
+    private var formStateSignature: String {
+        [
+            selectedTransport.rawValue,
+            selectedBudget.code,
+            requiresFreeFood.description,
+            requiresFreeDrink.description,
+            requiresPrivateRoom.description,
+            requiresParking.description,
+            requiresOpenNow.description,
+            requiresMidnight.description,
+            requiresPet.description,
+            keyword,
+            stationKeyword,
+            String(walkMaxMinutes),
+            String(carMaxMinutes),
+            String(trainMaxMinutes)
+        ].joined(separator: "|")
+    }
+
+    private var locationStateSignature: String {
+        [
+            String(locationService.authorizationStatus.rawValue),
+            locationService.latitude.map { String($0) } ?? "",
+            locationService.longitude.map { String($0) } ?? ""
+        ].joined(separator: "|")
+    }
+
+    @ToolbarContentBuilder
+    private var topToolbarContent: some ToolbarContent {
+        if !showFirstScreen {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("リセット") {
+                    resetSearchConditions()
+                }
+                .foregroundStyle(Color.wasiAccent)
+                .disabled(viewModel.isLoading)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    HistoryListView(historyStore: historyStore)
+                } label: {
+                    Text("履歴")
+                        .foregroundStyle(Color.wasiAccent)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var bottomBarContent: some View {
+        if !showFirstScreen && !showingResult {
+            wizardBottomBar
+        }
+    }
+
+    private func handleOnAppear() {
+        if locationService.isAuthorizedForLocation {
+            locationService.startUpdatingLocation()
+        }
+        syncTransportSelectionWithLocationAvailability()
+    }
+
+    private func handleSplashTask() async {
+        guard showFirstScreen else { return }
+        try? await Task.sleep(nanoseconds: 1_300_000_000)
+        withAnimation(.easeInOut(duration: 0.28)) {
+            showFirstScreen = false
+        }
+    }
+
+    private var rootContent: AnyView {
+        AnyView(
             ZStack {
-                Color.wasiBackground.ignoresSafeArea()
-                // 和紙の微細なテクスチャ感を出す薄いオーバーレイ
-                Rectangle()
-                    .fill(Color.wasiInk.opacity(0.018))
-                    .ignoresSafeArea()
+                backgroundLayer
 
                 if showFirstScreen {
                     FirstScreenView()
-                    .transition(.opacity)
+                        .transition(.opacity)
                 } else {
-                    GeometryReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 20) {
-                                // ── 現在地メッセージ ──
-                                if let locationMessage = locationMessageForCurrentTransport {
-                                    WasiNoticeView(message: locationMessage, icon: "location.fill")
-                                }
+                    mainSearchContent
+                }
+            }
+        )
+    }
 
-                                // ── 検索フォーム ──
-                                SearchConditionView(
-                                    selectedTransport: $selectedTransport,
-                                    selectedBudget: $selectedBudget,
-                                    requiresFreeFood: $requiresFreeFood,
-                                    requiresFreeDrink: $requiresFreeDrink,
-                                    requiresPrivateRoom: $requiresPrivateRoom,
-                                    requiresParking: $requiresParking,
-                                    requiresOpenNow: $requiresOpenNow,
-                                    requiresMidnight: $requiresMidnight,
-                                    requiresPet: $requiresPet,
-                                    keyword: $keyword,
-                                    currentStep: $currentWizardStep,
-                                    stepDirection: $wizardStepDirection,
-                                    stationKeyword: $stationKeyword,
-                                    stationCoordinate: $stationCoordinate,
-                                    walkMaxMinutes: $walkMaxMinutes,
-                                    carMaxMinutes: $carMaxMinutes,
-                                    trainMaxMinutes: $trainMaxMinutes,
-                                    onFormEdit: clearFormError
-                                )
-                                .id(formVersion)
-
-                                // ── エラー表示 ──
-                                if let msg = viewModel.errorMessage {
-                                    WasiNoticeView(message: msg, icon: "exclamationmark.circle", isError: true)
-                                }
-                                if let msg = formErrorMessage {
-                                    WasiNoticeView(message: msg, icon: "exclamationmark.circle", isError: true)
-                                }
-
-                                NavigationLink(isActive: $showingResult) {
-                                    SearchResultView(
-                                        viewModel: viewModel,
-                                        historyStore: historyStore,
-                                        selectedTransport: selectedTransport,
-                                        currentLatitude: locationService.latitude,
-                                        currentLongitude: locationService.longitude
-                                    )
-                                } label: { EmptyView() }
-                                .hidden()
-                            }
-                            .frame(maxWidth: .infinity, minHeight: max(proxy.size.height - 12, 0), alignment: .top)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 24)
-                            .padding(.bottom, 110)
-                        }
-                    }
-                }
-            }
-            .task { locationService.startUpdatingLocation() }
-            .task {
-                guard showFirstScreen else { return }
-                try? await Task.sleep(nanoseconds: 1_300_000_000)
-                withAnimation(.easeInOut(duration: 0.28)) {
-                    showFirstScreen = false
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if !showFirstScreen {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("リセット") {
-                            resetSearchConditions()
-                        }
-                        .foregroundStyle(Color.wasiAccent)
-                        .disabled(viewModel.isLoading)
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        NavigationLink {
-                            HistoryListView(historyStore: historyStore)
-                        } label: {
-                            Text("履歴")
-                                .foregroundStyle(Color.wasiAccent)
-                        }
-                    }
-                }
-            }
-            .toolbarBackground(Color.wasiBackground, for: .navigationBar)
-            .safeAreaInset(edge: .bottom) {
-                if !showFirstScreen && !showingResult {
-                    wizardBottomBar
-                }
-            }
-            .onChange(of: selectedTransport)      { _, _ in clearFormError() }
-            .onChange(of: selectedBudget)         { _, _ in clearFormError() }
-            .onChange(of: requiresFreeFood)       { _, _ in clearFormError() }
-            .onChange(of: requiresFreeDrink)      { _, _ in clearFormError() }
-            .onChange(of: requiresPrivateRoom)    { _, _ in clearFormError() }
-            .onChange(of: requiresParking)        { _, _ in clearFormError() }
-            .onChange(of: requiresOpenNow)        { _, _ in clearFormError() }
-            .onChange(of: requiresMidnight)       { _, _ in clearFormError() }
-            .onChange(of: requiresPet)            { _, _ in clearFormError() }
-            .onChange(of: keyword)                { _, _ in clearFormError() }
-            .onChange(of: stationKeyword)         { _, _ in clearFormError() }
-            .onChange(of: walkMaxMinutes)         { _, _ in clearFormError() }
-            .onChange(of: carMaxMinutes)          { _, _ in clearFormError() }
-            .onChange(of: trainMaxMinutes)        { _, _ in clearFormError() }
+    private var backgroundLayer: some View {
+        ZStack {
+            Color.wasiBackground.ignoresSafeArea()
+            Rectangle()
+                .fill(Color.wasiInk.opacity(0.018))
+                .ignoresSafeArea()
         }
+    }
+
+    private var mainSearchContent: AnyView {
+        AnyView(
+            GeometryReader { proxy in
+                ScrollView {
+                    searchContent(for: proxy)
+                }
+            }
+        )
+    }
+
+    private func searchContent(for proxy: GeometryProxy) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if let locationMessage = locationMessageForCurrentTransport {
+                WasiNoticeView(message: locationMessage, icon: "location.fill")
+            }
+
+            searchConditionSection
+            errorSection
+            resultNavigationLink
+        }
+        .frame(maxWidth: .infinity, minHeight: max(proxy.size.height - 12, 0), alignment: .top)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 24)
+        .padding(.bottom, 110)
+    }
+
+    private var searchConditionSection: AnyView {
+        AnyView(
+            SearchConditionView(
+                selectedTransport: $selectedTransport,
+                selectedBudget: $selectedBudget,
+                requiresFreeFood: $requiresFreeFood,
+                requiresFreeDrink: $requiresFreeDrink,
+                requiresPrivateRoom: $requiresPrivateRoom,
+                requiresParking: $requiresParking,
+                requiresOpenNow: $requiresOpenNow,
+                requiresMidnight: $requiresMidnight,
+                requiresPet: $requiresPet,
+                keyword: $keyword,
+                currentStep: $currentWizardStep,
+                stepDirection: $wizardStepDirection,
+                stationKeyword: $stationKeyword,
+                stationCoordinate: $stationCoordinate,
+                walkMaxMinutes: $walkMaxMinutes,
+                carMaxMinutes: $carMaxMinutes,
+                trainMaxMinutes: $trainMaxMinutes,
+                locationTransportEnabled: locationService.canUseNearbySearch,
+                transportHintText: effectiveTransportHint,
+                onFormEdit: clearFormError
+            )
+            .id(formVersion)
+        )
+    }
+
+    @ViewBuilder
+    private var errorSection: some View {
+        if let msg = viewModel.errorMessage {
+            WasiNoticeView(message: msg, icon: "exclamationmark.circle", isError: true)
+        }
+        if let msg = formErrorMessage {
+            WasiNoticeView(message: msg, icon: "exclamationmark.circle", isError: true)
+        }
+    }
+
+    private var resultNavigationLink: AnyView {
+        AnyView(
+            NavigationLink(isActive: $showingResult) {
+                SearchResultView(
+                    viewModel: viewModel,
+                    historyStore: historyStore,
+                    selectedTransport: selectedTransport,
+                    currentLatitude: locationService.latitude,
+                    currentLongitude: locationService.longitude
+                )
+            } label: { EmptyView() }
+            .hidden()
+        )
     }
 
     private var locationMessageForCurrentTransport: String? {
@@ -193,6 +270,26 @@ struct ContentView: View {
             return locationService.locationStatusMessage
         }
         return nil
+    }
+
+    private var effectiveTransportHint: String {
+        if selectedTransport == .walk || selectedTransport == .car {
+            if !locationService.isAuthorizedForLocation {
+                return "徒歩・車検索は位置情報を許可すると使えます。今は電車・駅検索のみ使えます。"
+            }
+            if !locationService.canUseNearbySearch {
+                return locationService.locationStatusMessage ?? "徒歩・車検索は今は使えません。"
+            }
+        }
+        if selectedTransport == .train &&
+            stationKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "駅名を入れると駅周辺で絞れます。入れなくても条件に合うお店を提案します。"
+        }
+        return selectedTransport.searchHint(
+            walkMinutes: walkMaxMinutes,
+            carMinutes: carMaxMinutes,
+            trainMinutes: trainMaxMinutes
+        )
     }
 
     private var wizardSteps: [SearchWizardStep] {
@@ -246,7 +343,7 @@ struct ContentView: View {
                                 .tint(Color.wasiSurface)
                         } else {
                             HStack(spacing: 8) {
-                                Image(systemName: isLastWizardStep ? "cart.fill" : "arrow.right")
+                                Image(systemName: isLastWizardStep ? "fork.knife" : "arrow.right")
                                     .font(.wasiBody(14, weight: .medium))
                                 Text(isLastWizardStep ? "注文" : "次へ")
                                     .font(.wasiBody(15, weight: .medium))
@@ -271,17 +368,17 @@ struct ContentView: View {
     }
 
     private func performSearch() {
-        if selectedTransport == .train && stationKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            formErrorMessage = "電車・駅を使うときは駅名を入れてください。"
-            return
+        syncTransportSelectionWithLocationAvailability()
+
+        if selectedTransport == .walk || selectedTransport == .car {
+            if locationService.authorizationStatus == .notDetermined {
+                locationService.requestPermissionIfNeeded()
+            } else if locationService.isAuthorizedForLocation &&
+                        (locationService.latitude == nil || locationService.longitude == nil) {
+                locationService.startUpdatingLocation()
+            }
         }
-        let needsLocation = selectedTransport == .walk || selectedTransport == .car
-        let hasLocation   = locationService.latitude != nil && locationService.longitude != nil
-        if needsLocation && !hasLocation {
-            formErrorMessage = "現在地がまだ取れていません。数秒待ってもう一度検索してください。"
-            locationService.startUpdatingLocation()
-            return
-        }
+
         Task {
             formErrorMessage = nil
             var condition = ShopSearchCondition(
@@ -309,7 +406,7 @@ struct ContentView: View {
                 if let coord = stationCoordinate {
                     condition.stationLatitude  = coord.latitude
                     condition.stationLongitude = coord.longitude
-                } else {
+                } else if !stationKeyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     let currentLocation: CLLocation?
                     if let lat = locationService.latitude, let lng = locationService.longitude {
                         currentLocation = CLLocation(latitude: lat, longitude: lng)
@@ -317,12 +414,10 @@ struct ContentView: View {
                         currentLocation = nil
                     }
                     let resolved = await stationResolver.resolve(stationName: stationKeyword, near: currentLocation)
-                    guard let resolved else {
-                        formErrorMessage = "駅「\(stationKeyword)」の位置を特定できませんでした。候補から選ぶか、駅名を正確に入力してください。"
-                        return
+                    if let resolved {
+                        condition.stationLatitude  = resolved.latitude
+                        condition.stationLongitude = resolved.longitude
                     }
-                    condition.stationLatitude  = resolved.latitude
-                    condition.stationLongitude = resolved.longitude
                 }
             }
             lastCondition = condition
@@ -334,6 +429,16 @@ struct ContentView: View {
     private func clearFormError() {
         formErrorMessage = nil
         viewModel.clearError()
+    }
+
+    private func syncTransportSelectionWithLocationAvailability() {
+        if locationService.canUseNearbySearch {
+            if selectedTransport == .train {
+                selectedTransport = .walk
+            }
+        } else if selectedTransport == .walk || selectedTransport == .car {
+            selectedTransport = .train
+        }
     }
 
     private func goPreviousWizardStep() {
@@ -353,7 +458,7 @@ struct ContentView: View {
     }
 
     private func resetSearchConditions() {
-        selectedTransport       = .walk
+        selectedTransport       = locationService.canUseNearbySearch ? .walk : .train
         selectedBudget          = .noLimit
         requiresFreeFood        = false
         requiresFreeDrink       = false
@@ -393,7 +498,7 @@ struct FirstScreenView: View {
                 Text("Powered by")
                     .font(.wasiBody(12, weight: .medium))
                     .foregroundStyle(Color.wasiInkLight)
-                Link("ホットペッパーグルメ Webサービス", destination: URL(string: "http://webservice.recruit.co.jp/")!)
+                Link("ホットペッパーグルメ Webサービス", destination: URL(string: "https://webservice.recruit.co.jp/")!)
                     .font(.wasiBody(12, weight: .medium))
                     .foregroundStyle(Color.wasiAccent)
             }
@@ -605,6 +710,8 @@ struct SearchConditionView: View {
     @Binding var walkMaxMinutes: Int
     @Binding var carMaxMinutes: Int
     @Binding var trainMaxMinutes: Int
+    let locationTransportEnabled: Bool
+    let transportHintText: String
     let onFormEdit: () -> Void
 
     var body: some View {
@@ -689,7 +796,7 @@ struct SearchConditionView: View {
 
     private var stepProgress: some View {
         HStack(spacing: 8) {
-            ForEach(allSteps) { step in
+            ForEach(Array(allSteps.enumerated()), id: \.element.id) { index, step in
                 HStack(spacing: 6) {
                     Image(systemName: stepSymbol(for: step))
                         .font(.wasiBody(10, weight: .semibold))
@@ -698,10 +805,12 @@ struct SearchConditionView: View {
                         .background(step.rawValue <= currentStep.rawValue ? Color.wasiAccent : Color.wasiAccentLight.opacity(0.75))
                         .clipShape(Circle())
 
-                    Capsule()
-                        .fill(step.rawValue <= currentStep.rawValue ? Color.wasiAccent : Color.wasiAccentLight.opacity(0.6))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 6)
+                    if index < allSteps.count - 1 {
+                        Capsule()
+                            .fill(step.rawValue < currentStep.rawValue ? Color.wasiAccent : Color.wasiAccentLight.opacity(0.6))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 6)
+                    }
                 }
             }
         }
@@ -752,6 +861,11 @@ struct SearchConditionView: View {
                     .buttonStyle(.plain)
                 }
             }
+
+            Text("キーワードを入れない場合は、条件に合うお店からランダムで1店舗を提案します。")
+                .font(.wasiBody(11))
+                .foregroundStyle(Color.wasiInkLight)
+                .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("こだわる人だけ文字入力")
@@ -804,7 +918,10 @@ struct SearchConditionView: View {
             WasiSectionLabel(title: "移動手段")
             VStack(spacing: 10) {
                 ForEach(TransportOption.allCases) { option in
+                    let isLocationBasedOption = option == .walk || option == .car
+                    let isDisabled = isLocationBasedOption && !locationTransportEnabled
                     Button {
+                        guard !isDisabled else { return }
                         selectedTransport = option
                     } label: {
                         HStack(spacing: 12) {
@@ -824,17 +941,39 @@ struct SearchConditionView: View {
                                     .font(.wasiBody(16))
                             }
                         }
-                        .foregroundStyle(selectedTransport == option ? Color.wasiSurface : Color.wasiInk)
+                        .foregroundStyle(
+                            selectedTransport == option
+                            ? Color.wasiSurface
+                            : (isDisabled ? Color.wasiInkLight : Color.wasiInk)
+                        )
                         .padding(14)
-                        .background(selectedTransport == option ? Color.wasiInk : Color.wasiAccentLight.opacity(0.28))
+                        .background(
+                            selectedTransport == option
+                            ? Color.wasiInk
+                            : (isDisabled ? Color.wasiSurface.opacity(0.55) : Color.wasiAccentLight.opacity(0.28))
+                        )
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(selectedTransport == option ? Color.wasiInk : Color.wasiBorder, lineWidth: 0.8)
+                                .stroke(
+                                    selectedTransport == option
+                                    ? Color.wasiInk
+                                    : (isDisabled ? Color.wasiBorder.opacity(0.55) : Color.wasiBorder),
+                                    lineWidth: 0.8
+                                )
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .opacity(isDisabled ? 0.72 : 1)
                     }
                     .buttonStyle(.plain)
+                    .disabled(isDisabled)
                 }
+            }
+
+            if !locationTransportEnabled {
+                Text("徒歩・車検索は位置情報を許可すると使えます。今は電車・駅のみ選べます。")
+                    .font(.wasiBody(11))
+                    .foregroundStyle(Color.wasiInkLight)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Divider()
@@ -922,11 +1061,7 @@ struct SearchConditionView: View {
     private var currentHint: some View {
         Group {
             if currentStep == .transport {
-                Text(selectedTransport.searchHint(
-                    walkMinutes: walkMaxMinutes,
-                    carMinutes: carMaxMinutes,
-                    trainMinutes: trainMaxMinutes
-                ))
+                Text(transportHintText)
                 .font(.wasiBody(12))
                 .foregroundStyle(Color.wasiInkLight)
             }
@@ -1044,6 +1179,27 @@ struct SearchResultView: View {
     @State private var autoSavedEntryID: UUID?
     @State private var autoSavedShopID: String?
 
+    private var rerollPrimaryText: String {
+        if !hasNextShopCandidate {
+            return "これ以上お店が見つかりません"
+        }
+        return "リロール"
+    }
+
+    private var rerollSecondaryText: String {
+        if !hasNextShopCandidate {
+            return "条件を変えて再検索してください"
+        }
+        if viewModel.remainingRerollCount == 0 {
+            return "リロール上限に達しました"
+        }
+        return "残り\(viewModel.remainingRerollCount)回"
+    }
+
+    private var hasNextShopCandidate: Bool {
+        viewModel.shops.indices.contains(viewModel.currentIndex + 1)
+    }
+
     var body: some View {
         ZStack {
             Color.wasiBackground.ignoresSafeArea()
@@ -1128,9 +1284,9 @@ struct SearchResultView: View {
                         viewModel.rerollShop()
                     } label: {
                         VStack(spacing: 2) {
-                            Text("リロール")
+                            Text(rerollPrimaryText)
                                 .font(.wasiBody(13, weight: .medium))
-                            Text("残り\(viewModel.remainingRerollCount)回")
+                            Text(rerollSecondaryText)
                                 .font(.wasiBody(10))
                                 .foregroundStyle(Color.wasiInkLight)
                         }
@@ -1879,40 +2035,7 @@ struct HistoryDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                historyContentCard
-                .padding(.horizontal, 20)
-                .padding(.vertical, 22)
-                .background(Color.wasiSurface)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.wasiBorder, lineWidth: 1.2))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .inset(by: 8)
-                        .stroke(Color.wasiBorder.opacity(0.9), lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(alignment: .topLeading) { miniFlourish().offset(x: 6, y: 6) }
-                .overlay(alignment: .topTrailing) { miniFlourish().scaleEffect(x: -1, y: 1).offset(x: -6, y: 6) }
-                .overlay(alignment: .bottomLeading) { miniFlourish().rotationEffect(.degrees(180)).offset(x: 6, y: -6) }
-                .overlay(alignment: .bottomTrailing) { miniFlourish().rotationEffect(.degrees(180)).scaleEffect(x: -1, y: 1).offset(x: -6, y: -6) }
-
-                if let shop = historyShopStore.shop(for: entry.shopID), let mapURL = shop.mapAppURL {
-                    if let lat = shop.lat, let lng = shop.lng {
-                        let region = MKCoordinateRegion(
-                            center: CLLocationCoordinate2D(latitude: lat, longitude: lng),
-                            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
-                        )
-                        Link(destination: mapURL) {
-                            Map(coordinateRegion: .constant(region), annotationItems: [MapPinPoint(coordinate: region.center)]) { item in
-                                MapMarker(coordinate: item.coordinate, tint: .red)
-                            }
-                            .frame(height: 180)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                        }
-                    }
-                    Link("地図アプリを開く", destination: mapURL)
-                        .font(.wasiBody(14, weight: .medium))
-                        .padding(.top, 4)
-                }
+                historyContent
             }
             .padding(16)
         }
@@ -1924,90 +2047,93 @@ struct HistoryDetailView: View {
         }
     }
 
+    private func shareText(for shop: Shop) -> String {
+        let address = shop.address ?? "住所情報なし"
+        let access = shop.mobileAccess ?? "アクセス情報なし"
+        let budget = shop.budget.name ?? shop.budget.average ?? "予算情報なし"
+        let link = shop.hotPepperURL?.absoluteString ?? shop.mapAppURL?.absoluteString ?? ""
+        return "イチタクで見つけたお店\n\(shop.name)\n住所: \(address)\nアクセス: \(access)\n予算: \(budget)\n\(link)"
+    }
+
     @ViewBuilder
-    private var historyContentCard: some View {
+    private var historyContent: some View {
         if let shop = historyShopStore.shop(for: entry.shopID) {
             VStack(alignment: .leading, spacing: 12) {
-                Text(shop.name)
-                    .font(.wasiDisplay(28))
-                    .foregroundStyle(Color.wasiInk)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .multilineTextAlignment(.center)
+                ShopCardView(
+                    shop: shop,
+                    accessText: shop.mobileAccess
+                )
 
-                AsyncImage(url: shop.largePhotoURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFill()
-                    case .empty:
-                        ZStack { Color.wasiAccentLight; ProgressView().tint(Color.wasiAccent) }
-                    default:
-                        Color.wasiAccentLight
+                ShareLink(
+                    item: shareText(for: shop),
+                    subject: Text("イチタクで見つけたお店"),
+                    message: Text("このお店をシェアします")
+                ) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.wasiBody(12, weight: .semibold))
+                        Text("このお店をシェア")
+                            .font(.wasiBody(13, weight: .medium))
+                        Spacer()
                     }
+                    .foregroundStyle(Color.wasiAccent)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(Color.wasiSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.wasiBorder, lineWidth: 0.9)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                .frame(height: 220)
-                .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.wasiBorder, lineWidth: 0.8))
-
-                if shop.largePhotoURL != nil {
-                    Text("画像提供：ホットペッパー グルメ")
-                        .font(.wasiBody(10))
-                        .foregroundStyle(Color.wasiInkLight)
-                }
-
-                historyRow(title: "住所", value: shop.address ?? "情報なし")
-                historyRow(title: "予算", value: shop.budget.name ?? shop.budget.average ?? "情報なし")
-                historyRow(title: "営業時間", value: shop.open ?? "情報なし")
-                historyRow(title: "アクセス", value: shop.mobileAccess ?? "情報なし")
-                historyRow(title: "保存日時", value: entry.date.formatted(date: .abbreviated, time: .shortened))
 
                 if let detailURL = shop.hotPepperURL {
-                    Link("ホットペッパーで詳細を見る", destination: detailURL)
-                        .font(.wasiBody(14, weight: .medium))
-                        .padding(.top, 4)
+                    Link(destination: detailURL) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "safari")
+                                .font(.wasiBody(12, weight: .semibold))
+                            Text("ホットペッパーで詳細を見る")
+                                .font(.wasiBody(13, weight: .medium))
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.wasiBody(12))
+                        }
+                        .foregroundStyle(Color.wasiAccent)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color.wasiSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.wasiAccent.opacity(0.45), lineWidth: 0.9)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+
+                if let mapURL = shop.mapAppURL {
+                    MapPreviewCard(
+                        shop: shop,
+                        mapURL: mapURL
+                    )
                 }
             }
         } else {
             VStack(alignment: .leading, spacing: 12) {
-                Text("店舗情報を読み込み中です")
-                    .font(.wasiDisplay(24))
-                    .foregroundStyle(Color.wasiInk)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .multilineTextAlignment(.center)
-
                 ZStack {
                     Color.wasiAccentLight
                     ProgressView().tint(Color.wasiAccent)
                 }
                 .frame(height: 220)
                 .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.wasiBorder, lineWidth: 0.8))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.wasiBorder, lineWidth: 0.8))
 
-                historyRow(title: "保存日時", value: entry.date.formatted(date: .abbreviated, time: .shortened))
+                Text("店舗情報を読み込み中です")
+                    .font(.wasiBody(13))
+                    .foregroundStyle(Color.wasiInkLight)
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-    }
-
-    private func historyRow(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.wasiBody(11))
-                .foregroundStyle(Color.wasiAccent)
-            Text(value)
-                .font(.wasiBody(14))
-                .foregroundStyle(Color.wasiInk)
-        }
-    }
-
-    private func miniFlourish() -> some View {
-        HStack(spacing: 1) {
-            Image(systemName: "leaf")
-                .font(.system(size: 9, weight: .semibold))
-            Image(systemName: "leaf.fill")
-                .font(.system(size: 7, weight: .semibold))
-        }
-        .foregroundStyle(Color.wasiAccent.opacity(0.62))
     }
 }
 

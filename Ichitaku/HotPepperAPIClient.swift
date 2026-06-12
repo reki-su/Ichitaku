@@ -30,6 +30,13 @@ struct ShopSearchCondition {
             words.append(keyword)
         }
 
+        if transport == .train, !stationKeyword.isEmpty {
+            let normalizedStation = stationKeyword.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !normalizedStation.isEmpty, !words.contains(normalizedStation) {
+                words.append(normalizedStation)
+            }
+        }
+
         return words.joined(separator: " ")
     }
 
@@ -266,10 +273,30 @@ struct HotPepperAPIClient {
     private let baseURL = "https://webservice.recruit.co.jp/hotpepper/gourmet/v1/"
     private let maxRangeMeters: Double = 3000
 
+    /// 審査版や本番版でも読めるように、Bundle設定と開発用環境変数の両方からAPIキーを探します。
+    private var apiKey: String? {
+        if let bundledKey = Bundle.main.object(forInfoDictionaryKey: "HOTPEPPER_API_KEY") as? String {
+            let trimmed = bundledKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        if let legacyBundledKey = Bundle.main.object(forInfoDictionaryKey: "HotPepperAPIKey") as? String {
+            let trimmed = legacyBundledKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        let environmentKey = ProcessInfo.processInfo.environment["HOTPEPPER_API_KEY"] ?? ""
+        let trimmedEnvironmentKey = environmentKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedEnvironmentKey.isEmpty ? nil : trimmedEnvironmentKey
+    }
+
     /// 店舗を検索します。
     func fetchShops(condition: ShopSearchCondition) async throws -> [Shop] {
-        let apiKey = ProcessInfo.processInfo.environment["HOTPEPPER_API_KEY"] ?? ""
-        guard !apiKey.isEmpty else {
+        guard let apiKey else {
             throw HotPepperAPIError.missingAPIKey
         }
 
@@ -321,8 +348,7 @@ struct HotPepperAPIClient {
 
     /// 店舗IDを指定して1件取得します。
     func fetchShop(id: String) async throws -> Shop? {
-        let apiKey = ProcessInfo.processInfo.environment["HOTPEPPER_API_KEY"] ?? ""
-        guard !apiKey.isEmpty else {
+        guard let apiKey else {
             throw HotPepperAPIError.missingAPIKey
         }
 
@@ -460,7 +486,7 @@ enum HotPepperAPIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "APIキーが見つかりません。XcodeのSchemeのEnvironment VariablesにHOTPEPPER_API_KEYを設定してください。"
+            return "APIキーが見つかりません。開発中はSchemeのEnvironment Variables、本番版はTargetのInfoでHOTPEPPER_API_KEYを設定してください。"
         case .invalidURL:
             return "検索URLの組み立てに失敗しました。"
         case .badResponse:
