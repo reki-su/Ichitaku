@@ -1396,7 +1396,7 @@ struct MapPreviewCard: View {
                 .buttonStyle(.plain)
             } else {
                 Link(destination: mapURL) {
-                    Text("地図アプリで場所を確認")
+                    Text("Apple Mapsで場所を確認")
                         .font(.wasiBody(13))
                         .foregroundStyle(Color.wasiAccent)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1669,7 +1669,7 @@ struct DecisionCelebrationView: View {
                             Link(destination: mapURL) {
                                 HStack {
                                     Spacer()
-                                    Text("地図アプリで開く")
+                                    Text("Apple Mapsで開く")
                                         .font(.wasiBody(14, weight: .medium))
                                         .tracking(0.5)
                                     Text("→")
@@ -1825,10 +1825,7 @@ struct HistoryListView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if historyStore.entries.isEmpty {
-                    Text("まだ履歴はありません。")
-                        .font(.wasiBody(13))
-                        .foregroundStyle(Color.wasiInkLight)
-                        .padding(.top, 24)
+                    emptyHistoryState
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("保存したお店")
@@ -1878,6 +1875,77 @@ struct HistoryListView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: historyStore.entries.map(\.shopID)) {
             await historyShopStore.loadShops(for: historyStore.entries.map(\.shopID))
+        }
+    }
+
+    private var emptyHistoryState: some View {
+        VStack(spacing: 16) {
+            Spacer(minLength: 28)
+
+            ZStack {
+                Circle()
+                    .fill(Color.wasiAccentLight.opacity(0.6))
+                    .frame(width: 76, height: 76)
+
+                Image(systemName: "book.closed")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(Color.wasiAccent)
+            }
+
+            VStack(spacing: 6) {
+                Text("まだ履歴がありません")
+                    .font(.wasiDisplay(22, weight: .semibold))
+                    .foregroundStyle(Color.wasiInk)
+
+                Text("お店を表示すると、ここに履歴がたまっていきます。")
+                    .font(.wasiBody(13))
+                    .foregroundStyle(Color.wasiInkLight)
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                emptyHistoryGuide(
+                    symbol: "fork.knife",
+                    title: "まずは1軒探す",
+                    subtitle: "条件を選ぶと、今夜のお店を1店舗だけ提案します。"
+                )
+                emptyHistoryGuide(
+                    symbol: "clock.arrow.circlepath",
+                    title: "あとから見返せる",
+                    subtitle: "表示されたお店は、あとから履歴で確認できます。"
+                )
+            }
+            .padding(14)
+            .background(Color.wasiSurface)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.wasiBorder, lineWidth: 0.9)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+            Spacer(minLength: 12)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 10)
+    }
+
+    private func emptyHistoryGuide(symbol: String, title: String, subtitle: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.wasiAccent)
+                .frame(width: 20, height: 20)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.wasiBody(13, weight: .medium))
+                    .foregroundStyle(Color.wasiInk)
+                Text(subtitle)
+                    .font(.wasiBody(11))
+                    .foregroundStyle(Color.wasiInkLight)
+            }
+
+            Spacer()
         }
     }
 

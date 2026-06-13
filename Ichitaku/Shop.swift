@@ -141,11 +141,14 @@ struct Shop: Codable, Identifiable {
     var mapAppURL: URL? {
         let query = [name, address].compactMap { $0 }.joined(separator: " ")
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+        if let lat, let lng, let encoded {
+            return URL(string: "http://maps.apple.com/?ll=\(lat),\(lng)&q=\(encoded)")
+        }
         if let encoded {
-            return URL(string: "https://www.google.com/maps/dir/?api=1&destination=\(encoded)")
+            return URL(string: "http://maps.apple.com/?q=\(encoded)")
         }
         if let lat, let lng {
-            return URL(string: "https://www.google.com/maps/dir/?api=1&destination=\(lat),\(lng)")
+            return URL(string: "http://maps.apple.com/?ll=\(lat),\(lng)")
         }
         return nil
     }
