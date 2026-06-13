@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>HOTPEPPER_API_KEY</key>
-	<string>4b861e543dffec2a</string>
+	<string>$(HOTPEPPER_API_KEY)</string>
 </dict>
 </plist>
